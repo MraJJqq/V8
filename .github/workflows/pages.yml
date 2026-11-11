@@ -1,0 +1,157 @@
+name: Build and Deploy VEGAS V8
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: vegas-v8-pages
+  cancel-in-progress: false
+
+jobs:
+  migrate-build-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout V8
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Fetch complete Media library
+        run: git clone --depth 1 https://github.com/MraJJqq/Media.git /tmp/vegas-media
+
+      - name: Migrate all seven systems and supporting assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC=/tmp/vegas-media
+          mkdir -p docs tools assets/backgrounds
+
+          # Runtime package: copy the complete V6 seven-system snapshot to V8 root.
+          cp -a "$SRC/V6/assets" .
+          cp -a "$SRC/V6/cards" .
+          cp -a "$SRC/V6/kline" .
+          cp -a "$SRC/V6/modules" .
+          cp "$SRC/V6/index.html" ./index.html
+          cp "$SRC/V6/README.md" docs/V6-BASELINE.md
+          cp "$SRC/V6/OPERATING-FLOWS.md" docs/SEVEN-SYSTEMS.md
+          cp "$SRC/V6/tools/validate_v6.py" tools/validate_v8.py
+
+          # Retain every separate Media asset/reference collection as well.
+          for dir in Backgrounds Brand Logos Cards Charts References Templates UI; do
+            cp -a "$SRC/$dir" .
+          done
+          cp "$SRC/README.md" docs/MEDIA-LIBRARY-README.md
+          cp "$SRC/Backgrounds/V6-Dark-Galaxy.svg" assets/backgrounds/V6-Dark-Galaxy.svg
+
+          # Present the rebuilt site as V8 while keeping the proven runtime logic intact.
+          sed -i 's/<title>VEGAS V6 · Gate<\/title>/<title>VEGAS V8 · Gate<\/title>/' index.html
+
+          # Align the operating-flow document with the implemented five-period selector.
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("docs/SEVEN-SYSTEMS.md")
+          s = p.read_text(encoding="utf-8")
+          replacements = [
+              ("four native display intervals: `1H`, `4H`, `8H`, `D`.",
+               "five native display intervals: `1H`, `2H`, `4H`, `8H`, `D`."),
+              ("accepted values are `1H`, `4H`, `8H`, and `D`.",
+               "accepted values are `1H`, `2H`, `4H`, `8H`, and `D`."),
+              ("Supported intervals in this system are `1H`, `4H`, `8H`, and `D`.",
+               "Supported intervals in this system are `1H`, `2H`, `4H`, `8H`, and `D`."),
+              ("all four intervals", "all five intervals"),
+              ("four intervals propagate", "five intervals propagate"),
+          ]
+          for old, new in replacements:
+              s = s.replace(old, new)
+          p.write_text(s, encoding="utf-8")
+
+          # Keep validator failure reporting after all checks, including the five-period checks.
+          p = Path("tools/validate_v8.py")
+          s = p.read_text(encoding="utf-8")
+          s = s.replace(
+              '"""Static integrity checks for the standalone VEGAS V6 Pages site."""',
+              '"""Static integrity checks for the standalone VEGAS V8 Pages site."""'
+          )
+          old = '''if errors:
+              print("V6 validation FAILED:")
+              for error in errors:
+                  print(" -", error)
+              sys.exit(1)
+          print(f"V6 validation passed: {len(html_files)} HTML files; local references, inline scripts, CSS, imports, namespaces and dependencies checked.")
+
+          '''
+          s = s.replace(old, "")
+          s += '''
+          if errors:
+              print("V8 validation FAILED:")
+              for error in errors:
+                  print(" -", error)
+              sys.exit(1)
+          print(f"V8 validation passed: {len(html_files)} HTML files; local references, inline scripts, CSS, imports, namespaces and dependencies checked.")
+          '''
+          p.write_text(s, encoding="utf-8")
+          PY
+
+          cat > README.md <<'EOF'
+          # VEGAS V8
+
+          VEGAS V8 is rebuilt from the Media library's complete seven-system website package. All seven systems, their runtime files, local dependencies, visual assets and operating rules are migrated together.
+
+          ## 七大系统
+
+          1. **K线系统**：Gate USDT 永续合约 K线、历史补齐、实时更新、缓存和 Vegas EMA。
+          2. **统一视窗与手势系统**：五个周期共用一套页面级视窗状态；周期和品种切换不创建独立缩放状态。
+          3. **滚动行情卡片系统**：27 个本地卡片、Gate 行情、点选、拖动和轮播。
+          4. **Logo 与倒计时系统**：27 个本地 SVG 标识、淡入淡出切换和周期倒计时。
+          5. **五周期系统**：**1H、2H、4H、8H、D**；2H 由 Gate 原始 1H K线按 UTC 两小时边界聚合。
+          6. **V12 信号与底部滚动系统**：读取 V12 公共信号 JSON；V8 只展示信号，不复制信号生成、扫描或推送。
+          7. **全屏幕动态系统**：统一负责动态视口高度、横竖屏布局和安全区域适配。
+
+          ## 数据与资源边界
+
+          - K线与卡片行情：Gate USDT 永续合约。
+          - 正式信号：`https://raw.githubusercontent.com/MraJJqq/v12/main/v12/public-signals.json`。
+          - 27 个品种 Logo、字体、图标、CSS、模块和页面资源均在本仓库本地保存。
+          - 背景原始素材保留在 `Backgrounds/`；网页实际使用的背景副本位于 `assets/backgrounds/`。
+          - 五个周期共用同一套视窗状态，不得拆分为各周期独立视窗。
+
+          ## 目录
+
+          - `index.html`：V8 网页入口。
+          - `assets/`、`cards/`、`kline/`、`modules/`：七大系统运行代码和本地依赖。
+          - `Backgrounds/`、`Brand/`、`Logos/`、`Cards/`、`Charts/`、`References/`、`Templates/`、`UI/`：完整配套素材与规范。
+          - `docs/SEVEN-SYSTEMS.md`：七大系统职责、运行流程和集成契约。
+          - `tools/validate_v8.py`：静态完整性检查。
+
+          GitHub Pages 由 `.github/workflows/pages.yml` 自动部署。
+          EOF
+
+          touch .nojekyll
+          python3 tools/validate_v8.py
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "Rebuild V8 from complete Media seven-system package"
+            git push origin HEAD:main
+          fi
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload V8 website
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+      - name: Deploy V8 website
+        id: deployment
+        uses: actions/deploy-pages@v4
