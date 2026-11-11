@@ -1,0 +1,14 @@
+{
+  "source": "MraJJqq/V6",
+  "source_file": "kline/v6-vegas-ema.js",
+  "ema_colors": {
+    "EMA12": "#f5d76e",
+    "EMA36": "#BEE9F0",
+    "EMA43": "#BEE9F0",
+    "EMA144": "#f4d35e",
+    "EMA169": "#f4d35e",
+    "EMA576": "#ff4e5e",
+    "EMA676": "#ff4e5e"
+  },
+  "notes": "与 V6 当前 EMA_DEFS 一致；36/43、144/169、576/676 分别使用成对同色。仅记录视觉规范，不包含计算逻辑。"
+}

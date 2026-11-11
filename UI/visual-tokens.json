@@ -1,0 +1,26 @@
+{
+  "source": "MraJJqq/V6",
+  "colors": {
+    "text": "#f2f5ff",
+    "card_up": "#00f5a0",
+    "card_down": "#ff3b6b",
+    "ema12": "#f5d76e",
+    "ema36_ema43": "#BEE9F0",
+    "ema144_ema169": "#f4d35e",
+    "ema576_ema676": "#ff4e5e",
+    "candle_up": "#22b07d",
+    "candle_down": "#e5484d"
+  },
+  "typography": {
+    "font_stack": "-apple-system, SF Pro Display, PingFang SC, Roboto, sans-serif",
+    "card_symbol": "12px / 700",
+    "card_price": "22px / 800",
+    "card_change": "9px / 700"
+  },
+  "card": {
+    "width_px": 172,
+    "height_px": 100,
+    "radius_px": 14
+  },
+  "page_background": "transparent at component level; background artwork is maintained separately under Backgrounds/"
+}

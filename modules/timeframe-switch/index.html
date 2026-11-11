@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>周期切换</title>
+<link rel="stylesheet" href="./responsive.css?v=v6-static-20261110-1">
+<style>
+@font-face{font-family:'Chakra Petch';src:url('../../assets/fonts/ChakraPetch-Bold.ttf') format('truetype');font-style:normal;font-weight:700;font-display:swap}
+:root{--ink:#e8f0ff;--mute:#7f8db0;--up:#2ee6a6;color-scheme:dark}
+*{box-sizing:border-box}
+html,body{width:100%;height:100%;margin:0;overflow:hidden;background:transparent;font-family:'Chakra Petch',ui-sans-serif,system-ui,sans-serif;-webkit-user-select:none;user-select:none}
+.tf{position:absolute;inset:0 auto 0 0;width:100%;height:100%;display:flex;flex-direction:column;align-items:flex-start;justify-content:space-evenly;gap:0;perspective:700px}
+.tf button{border:0;background:none;padding:0 clamp(4px,1vw,8px);width:auto;height:20%;min-height:0;font:700 clamp(16px,2.6vh,24px)/1.05 'Chakra Petch',sans-serif;color:var(--mute);cursor:pointer;transform-style:preserve-3d;-webkit-tap-highlight-color:transparent;
+  transition:font-size .35s cubic-bezier(.2,.8,.2,1),color .35s,transform .35s cubic-bezier(.2,.8,.2,1),filter .35s}
+.tf button[aria-pressed="true"]{font-size:clamp(28px,4.3vh,44px);color:var(--ink);transform:translateZ(24px);filter:drop-shadow(0 0 12px rgba(46,230,166,.7)) drop-shadow(0 10px 14px rgba(0,0,0,.6))}
+.tf button:focus-visible{outline:2px solid var(--up);outline-offset:2px;border-radius:8px}
+</style>
+</head>
+<body>
+<div class="tf" role="group" aria-label="周期">
+  <button aria-pressed="false">1H</button>
+  <button aria-pressed="false">2H</button>
+  <button aria-pressed="true">4H</button>
+  <button aria-pressed="false">8H</button>
+  <button aria-pressed="false">D</button>
+</div>
+<script>
+const bs=[...document.querySelectorAll('.tf button')];
+function setTimeframe(value){bs.forEach(b=>{const active=b.textContent.trim()===value;b.setAttribute("aria-pressed",String(active));b.style.transform="";});}
+window.addEventListener("message",event=>{if(event.origin!==location.origin||event.source!==window.parent)return;const data=event.data;if(!data||typeof data!=="object"||data.type!=="VEGAS_TIMEFRAME_SET"||!["1H","2H","4H","8H","D"].includes(data.timeframe))return;setTimeframe(data.timeframe);});
+const base=b=>b.getAttribute('aria-pressed')==='true'?(matchMedia('(orientation:landscape)').matches?'translateZ(16px)':'translateZ(24px)'):'';
+bs.forEach(b=>{
+  b.addEventListener('click',()=>{
+    bs.forEach(o=>{o.setAttribute('aria-pressed',o===b);o.style.transform=''});
+    window.parent.postMessage({type:"VEGAS_TIMEFRAME_SELECT",timeframe:b.textContent.trim()},location.origin);
+  });
+  b.addEventListener('pointermove',e=>{
+    const r=b.getBoundingClientRect(),x=(e.clientX-r.left)/r.width,y=(e.clientY-r.top)/r.height;
+    b.style.transform=`${base(b)} rotateX(${(.5-y)*18}deg) rotateY(${(x-.5)*18}deg)`;
+  });
+  b.addEventListener('pointerleave',()=>{b.style.transform=''});
+});
+</script>
+</body>
+</html>
