@@ -26,7 +26,11 @@ function renderCountdown(){
  // Date.now() reads the device's system clock (iPhone when opened on iPhone).
  const now=Date.now();
  if(!current){countdown.hidden=true;return;}
- const nextClose=(Math.floor(now/intervalMs)+1)*intervalMs;
+ // Daily candles/countdown follow Beijing time: 00:00 to the next 00:00 (UTC+8).
+ const BEIJING_OFFSET_MS=8*60*60*1000;
+ const nextClose=intervalMs===TIMEFRAME_MS.D
+  ? (Math.floor((now+BEIJING_OFFSET_MS)/intervalMs)+1)*intervalMs-BEIJING_OFFSET_MS
+  : (Math.floor(now/intervalMs)+1)*intervalMs;
  const remainingMinutes=Math.max(0,Math.ceil((nextClose-now)/60000));
  const hours=Math.floor(remainingMinutes/60),minutes=remainingMinutes%60;
  countdown.textContent=[hours,minutes].map(v=>String(v).padStart(2,"0")).join(":");
