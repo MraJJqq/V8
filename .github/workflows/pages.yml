@@ -67,7 +67,7 @@ jobs:
 
           p = Path("assets/css/full-screen-dynamic.css")
           s = p.read_text(encoding="utf-8")
-          rule = '\\n#background-frame{position:fixed;inset:0;width:100vw;height:100vh;height:100dvh;margin:0;padding:0;border:0;z-index:0;display:block;background:transparent;pointer-events:none;overflow:hidden}\\n'
+          rule = '\n#background-frame{position:fixed;inset:0;width:100vw;height:100vh;height:100dvh;margin:0;padding:0;border:0;z-index:0;display:block;background:transparent;pointer-events:none;overflow:hidden}\n'
           if "#background-frame" not in s:
               p.write_text(s + rule, encoding="utf-8")
           PY
