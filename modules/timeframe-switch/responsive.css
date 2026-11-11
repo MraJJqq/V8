@@ -1,6 +1,6 @@
 /* V6 timeframe iframe only: extracted from the page-wide fullscreen stylesheet. */
 html body .tf{width:100%;height:100%;gap:0}
-html body .tf button{width:100%;min-height:0;height:25%;padding:0 clamp(3px,1vw,8px);font-size:clamp(24px,4dvh,34px)!important}
+html body .tf button{width:100%;min-height:0;height:15%;padding:0 clamp(3px,1vw,8px);font-size:clamp(24px,4dvh,34px)!important}
 html body .tf button[aria-pressed=true]{font-size:clamp(36px,6dvh,51px)!important}
 @media(orientation:landscape){
  html body .tf button{font-size:clamp(20px,6.5dvh,28px)!important}
