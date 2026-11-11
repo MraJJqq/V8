@@ -53,25 +53,6 @@ jobs:
           # Present the rebuilt site as V8 while keeping the proven runtime logic intact.
           sed -i 's/<title>VEGAS V6 · Gate<\/title>/<title>VEGAS V8 · Gate<\/title>/' index.html
 
-          # Re-apply the V8-only background integration after the Media V6 package copy.
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path("index.html")
-          s = p.read_text(encoding="utf-8")
-          old = '  <img id="page-background" src="./assets/backgrounds/milkyway-wallpaper.webp?v=20261111-1" alt="" aria-hidden="true" />'
-          new = '  <iframe id="background-frame" src="./assets/backgrounds/milkyway-bg.html?v=20261111-2" title="银河斜带背景" aria-hidden="true" tabindex="-1"></iframe>'
-          if old not in s:
-              raise SystemExit("Expected V6 background element not found; refusing to deploy.")
-          s = s.replace(old, new, 1)
-          p.write_text(s, encoding="utf-8")
-
-          p = Path("assets/css/full-screen-dynamic.css")
-          s = p.read_text(encoding="utf-8")
-          rule = '\n#background-frame{position:fixed;inset:0;width:100vw;height:100vh;height:100dvh;margin:0;padding:0;border:0;z-index:0;display:block;background:transparent;pointer-events:none;overflow:hidden}\n'
-          if "#background-frame" not in s:
-              p.write_text(s + rule, encoding="utf-8")
-          PY
-
           # Align the operating-flow document with the implemented five-period selector.
           python3 - <<'PY'
           from pathlib import Path
