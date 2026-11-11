@@ -28,7 +28,7 @@ function frame(){
  if(emaRange){mn=Math.min(mn,emaRange.min);mx=Math.max(mx,emaRange.max)}
  const m=(mx-mn)*.08||mn*.001;mn=Math.max(Number.MIN_VALUE,mn-m);mx+=m;
  if(!inited){lo=mn;hi=mx;inited=true}else{lo+=(mn-lo)*.3;hi+=(mx-hi)*.3;if(Math.abs(mn-lo)+Math.abs(mx-hi)>(mx-mn)*.002)ask();else{lo=mn;hi=mx}}
- draw(i0,i1);overlay.setView(viewport());overlay.renderNow()
+ draw(i0,i1);overlay.setView(viewport())
 }
 function loop(t){raf=0;if(destroyed)return;const dt=Math.min(t-lastT,40)||16;lastT=t;if(Math.abs(vel)>.0004){const r0=right;setRight(right+vel*dt);if(right===r0)vel=0;vel*=Math.pow(.94,dt/16);ask()}else{if(vel!==0)saveViewport();vel=0;}frame()}
 function pos(e){const r=canvas.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top}}
