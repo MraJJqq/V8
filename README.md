@@ -29,3 +29,5 @@ VEGAS V8 is rebuilt from the Media library's complete seven-system website packa
 - `tools/validate_v8.py`：静态完整性检查。
 
 GitHub Pages 由 `.github/workflows/pages.yml` 自动部署。
+
+<!-- Media cache release sync trigger -->
