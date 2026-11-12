@@ -98,13 +98,14 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
  const pendingWrites=new Map(),requestControllers=new Set(),latestJobs=new Map(),latestCheckedAt=new Map();
  let queueRunning=false,queueRestartRequested=false,paused=false;
  const completed=new Set(),failed=new Map();
+ let forceLatestSweep=false;
  const canWork=()=>!stopped&&!paused&&!isHidden();
  function trimMemoryCache(){
   let total=0;for(const value of memoryCache.values())total+=value.candles?.length||0;
   while(memoryCache.size&&(memoryCache.size>8||total>MEMORY_MAX_TOTAL)){let victim=null,oldest=Infinity;for(const [key,value] of memoryCache){if((value.updatedAt||0)<oldest){oldest=value.updatedAt||0;victim=key}}if(victim===null)break;total-=memoryCache.get(victim)?.candles?.length||0;memoryCache.delete(victim);memoryCacheIncomplete.add(victim)}
  }
  function putMemory(key,previous,rows,done,status,error){
-  const all=merge(previous.candles,rows),limited=all.length>MEMORY_MAX_PER_SERIES,data=limited?all.slice(-MEMORY_MAX_PER_SERIES):all;if(limited)memoryCacheIncomplete.add(key);const boundary=!limited&&!memoryCacheIncomplete.has(key)&&(done===true||previous.historyBoundaryReached===true),gap=status==="latest-verified"?"clear":(previous.latestGapStatus||"pending");
+  const all=merge(previous.candles,rows),limited=all.length>MEMORY_MAX_PER_SERIES,data=limited?all.slice(-MEMORY_MAX_PER_SERIES):all;if(limited)memoryCacheIncomplete.add(key);const boundary=!limited&&!memoryCacheIncomplete.has(key)&&(done===true||previous.historyBoundaryReached===true),gap=status==="latest-verified"?"clear":(["latest-data-updated","history-gap-pending","failed","paused"].includes(status)?"pending":(previous.latestGapStatus||"pending"));
   memoryCache.set(key,{id:key,source:"Gate USDT perpetual",updatedAt:Date.now(),schemaVersion:3,historyComplete:boundary&&gap==="clear",historyBoundaryReached:boundary,historyBoundaryStatus:boundary?"api-empty-page-confirmed":"not-yet-confirmed",latestGapStatus:gap,requestStatus:limited?"memory-limit":status,lastError:error??previous.lastError??null,candleCount:data.length,oldestTimestamp:data[0]?.t??null,newestTimestamp:data.at(-1)?.t??null,candles:data,cacheMode:"memory",truncated:limited});
   trimMemoryCache();if(limited)onState({status:"cache-memory-limit",key,retained:data.length,limit:MEMORY_MAX_PER_SERIES});
  }
@@ -127,7 +128,7 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
    const fail=e=>{if(failed)return;failed=true;try{tx.abort()}catch(_){}reject(e||new Error("IndexedDB cache write failed"))};
    const apply=()=>{if(!lr||!mr||failed)return;const previous=metaReq.result||legacyReq.result||{},legacy=legacyReq.result;if(legacy){for(const c of legacy.candles||[])rowsStore.put({id:key+"|"+c.t,series:key,...c});legacyStore.delete(key)}for(const c of rows)rowsStore.put({id:key+"|"+c.t,series:key,...c});
     const idx=rowsStore.index("series"),cr=idx.count(key),fr=idx.openCursor(IDBKeyRange.only(key),"next"),rr=idx.openCursor(IDBKeyRange.only(key),"prev");let count,first,last,cd=false,fd=false,rd=false;
-    const save=()=>{if(!cd||!fd||!rd)return;const boundary=done===true||previous.historyBoundaryReached===true,gap=status==="latest-verified"?"clear":(previous.latestGapStatus||"pending");metaStore.put({id:key,source:"Gate USDT perpetual",updatedAt:Date.now(),schemaVersion:3,historyComplete:boundary&&gap==="clear",historyBoundaryReached:boundary,historyBoundaryStatus:boundary?"api-empty-page-confirmed":"not-yet-confirmed",latestGapStatus:gap,requestStatus:status,lastError:error??(status==="failed"?previous.lastError:null),candleCount:count,oldestTimestamp:first?.value?.t??null,newestTimestamp:last?.value?.t??null,cacheMode:"indexeddb"})};
+    const save=()=>{if(!cd||!fd||!rd)return;const boundary=done===true||previous.historyBoundaryReached===true,gap=status==="latest-verified"?"clear":(["latest-data-updated","history-gap-pending","failed","paused"].includes(status)?"pending":(previous.latestGapStatus||"pending"));metaStore.put({id:key,source:"Gate USDT perpetual",updatedAt:Date.now(),schemaVersion:3,historyComplete:boundary&&gap==="clear",historyBoundaryReached:boundary,historyBoundaryStatus:boundary?"api-empty-page-confirmed":"not-yet-confirmed",latestGapStatus:gap,requestStatus:status,lastError:error??(status==="failed"?previous.lastError:null),candleCount:count,oldestTimestamp:first?.value?.t??null,newestTimestamp:last?.value?.t??null,cacheMode:"indexeddb"})};
     cr.onsuccess=()=>{count=cr.result;cd=true;save()};fr.onsuccess=()=>{first=fr.result;fd=true;save()};rr.onsuccess=()=>{last=rr.result;rd=true;save()};cr.onerror=fr.onerror=rr.onerror=()=>fail(new Error("IndexedDB cache index update failed"))};
    legacyReq.onsuccess=()=>{lr=true;apply()};metaReq.onsuccess=()=>{mr=true;apply()};legacyReq.onerror=metaReq.onerror=()=>fail(tx.error);tx.oncomplete=()=>{memoryCache.delete(key);memoryCacheIncomplete.delete(key);resolve()};tx.onerror=tx.onabort=()=>fail(tx.error||new Error("IndexedDB write transaction failed"))
   });void checkStorage()
@@ -166,7 +167,18 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
  async function backfillPeriod(c,tf){
   const key=keyOf(c,tf),cached=await read(key);
   if(!canWork())return;
-  if(cached.historyBoundaryReached===true&&cached.latestGapStatus==="clear"){await ensureEmaSeries(key,cached.candles,await getDB());completed.add(key);failed.delete(key);return}
+  if(cached.historyBoundaryReached===true&&cached.latestGapStatus==="clear"){
+  const fresh=isActive(c,tf)?[]:await latest(c,3,tf);
+  if(!canWork())return;
+  let verified=merge(cached.candles,fresh);
+  if(fresh.length)await write(key,verified,true,"latest-data-updated");
+  verified=await repairGaps(c,tf,verified);
+  if(!canWork()){await write(key,verified,true,"paused");return}
+  await write(key,verified,true,"latest-verified");
+  await ensureEmaSeries(key,verified,await getDB());
+  if(isActive(c,tf)){candles=verified;complete=true;render(verified,selection,tf)}
+  completed.add(key);failed.delete(key);return;
+ }
   let rows=merge(cached.candles),done=cached.historyBoundaryReached===true;
   if(isActive(c,tf)&&!rows.length)return;
   const fresh=isActive(c,tf)?[]:await latest(c,rows.length?3:PAGE,tf);
@@ -198,7 +210,8 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
   if(isActive(c,tf)){candles=rows;complete=done;render(rows,selection,tf);onState({symbol,contract:c,timeframe:tf,count:rows.length,historyComplete:done,status:done?"history-boundary-reached":"paused"})}
  }
  async function runHistoryQueue(){
-  if(queueRunning||!canWork())return;
+  if(!canWork())return;
+  if(queueRunning){if(forceLatestSweep)queueRestartRequested=true;return;}
   queueRunning=true;
   try{
    const active=instruments.find(item=>item.symbol===symbol),ordered=active?[active,...instruments.filter(item=>item!==active)]:instruments;
@@ -207,7 +220,7 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
     for(const tf of periods){
      if(!canWork())break;
      const key=keyOf(item.gateContract||item.contract,tf);
-     if(completed.has(key))continue;
+     if(completed.has(key)&&!forceLatestSweep)continue;
      const c=item.gateContract||item.contract;
      try{await backfillPeriod(c,tf);if(completed.has(key))failed.delete(key)}
      catch(error){
@@ -222,10 +235,11 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
    }
   }finally{
    queueRunning=false;
+   if(canWork())forceLatestSweep=false;
    if(queueRestartRequested&&canWork()){queueRestartRequested=false;void runHistoryQueue()}
   }
  }
- function startHistoryQueue(){if(stopped||paused||isHidden())return;if(queueRunning)return;void runHistoryQueue()}
+ function startHistoryQueue(forceLatest=false){if(stopped||paused||isHidden())return;if(forceLatest)forceLatestSweep=true;if(queueRunning){if(forceLatest)queueRestartRequested=true;return;}void runHistoryQueue()}
  async function updateLatest(c,tf,token,force=false){
   const key=keyOf(c,tf),last=latestCheckedAt.get(key)||0;
   if(!force&&Date.now()-last<60000)return true;
@@ -254,15 +268,16 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
     }
    }catch(error){
     const savedAfterRepair=await read(key);
+    await write(key,savedAfterRepair.candles,cached.historyBoundaryReached===true,"history-gap-pending",String(error?.message||error));
     await updateLatestEma(key,savedAfterRepair.candles,await getDB());
     if(isActive(c,tf)&&current(token)){candles=merge(savedAfterRepair.candles);render(candles,token,tf);onState({symbol,contract:c,timeframe:tf,status:"history-gap-pending",error:String(error?.message||error)});}
    }
    if(!cached.candles?.length&&!completed.has(key)){if(queueRunning)queueRestartRequested=true;else startHistoryQueue();}
    return true;
-  })().catch(error=>{if(isActive(c,tf)&&current(token))onState({symbol,contract:c,timeframe:tf,status:"latest-refresh-failed",error:String(error?.message||error)});return false}).finally(()=>latestJobs.delete(key));
+  })().catch(async error=>{const message=String(error?.message||error);try{const snapshot=await read(key);await write(key,snapshot.candles,false,"failed",message)}catch(_){}if(isActive(c,tf)&&current(token))onState({symbol,contract:c,timeframe:tf,status:"latest-refresh-failed",error:message});return false}).finally(()=>latestJobs.delete(key));
   latestJobs.set(key,job);return job;
  }
- async function select(nextSymbol,nextContract,tf=timeframe){
+ async function select(nextSymbol,nextContract,tf=timeframe,forceLatest=false){
   if(stopped)return false;
   if(!TIMEFRAMES.includes(tf))throw new Error("Unsupported timeframe: "+tf);
   const item=bySymbol.get(nextSymbol),c=nextContract||item?.gateContract||item?.contract;
@@ -273,14 +288,14 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
    const cached=await read(keyOf(c,tf));if(!current(token)||!canWork())return false;
    candles=merge(cached.candles);complete=cached.historyComplete===true;render(candles,token,tf);
    onState({symbol,contract,timeframe,count:candles.length,historyComplete:complete,status:"cache-loaded"});
-   subscribe();startHistoryQueue();
-   void updateLatest(c,tf,token,false);
+   subscribe();startHistoryQueue(forceLatest);
+   void updateLatest(c,tf,token,forceLatest);
    return candles.length>0
   }catch(e){if(current(token))onState({symbol,contract,timeframe,count:candles.length,historyComplete:complete,status:"cache-read-failed",error:String(e?.message||e)});return false}
  }
  async function refresh(){if(stopped||!contract||!canWork())return false;return updateLatest(contract,timeframe,selection,true)}
  function suspend(){paused=true;for(const controller of requestControllers)controller.abort("page-hidden");closeWS();void flushPendingWrites()}
- function resume(){if(stopped||isHidden())return;paused=false;if(contract)void select(symbol,contract,timeframe);else startHistoryQueue()}
+ function resume(){if(stopped||isHidden())return;paused=false;forceLatestSweep=true;if(contract)void select(symbol,contract,timeframe,true);else startHistoryQueue(true)}
  function destroy(){if(stopped)return;stopped=true;paused=true;selection++;for(const controller of requestControllers)controller.abort("controller-destroyed");closeWS();void flushPendingWrites()}
  return Object.freeze({select,refresh,resume,suspend,destroy,getContracts,get state(){return Object.freeze({symbol,contract,timeframe,count:candles.length,historyComplete:complete,historyQueue:Object.freeze({running:queueRunning,completed:completed.size,total:instruments.length*TIMEFRAMES.length,failed:Object.fromEntries(failed)})})}});
 }
