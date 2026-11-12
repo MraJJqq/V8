@@ -142,7 +142,7 @@ if "discardedLegacyArray" not in controller:
 
 
 # All static CSS/JS entry resources use one cache-busting release token.
-STATIC_ASSET_VERSION = "v6-static-20261112-2"
+STATIC_ASSET_VERSION = "v6-static-20261112-3"
 KLINE_SYNC_VERSION = "v6-kline-sync-2"
 static_versions = set()
 for page in html_files:
