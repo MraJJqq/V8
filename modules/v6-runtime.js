@@ -95,7 +95,7 @@ lifecycle.listen(timeframeFrame,"load",sendTimeframeState);
 lifecycle.listen(window,"message",event=>{
  if(event.origin!==location.origin)return;
  if(event.source===timeframeFrame?.contentWindow&&event.data?.type==="VEGAS_TIMEFRAME_SELECT"){switchTimeframe(event.data.timeframe);return;}
- if(event.source!==window)return;
+ if(event.source!==rollingFrame?.contentWindow)return;
  if(event.data?.type==="VEGAS_CARD_INTERACTION"&&typeof event.data.active==="boolean"){setInteractionLock("rolling-cards",event.data.active);return;}
  if(event.data?.type==="VEGAS_CARD_SELECT"&&typeof event.data.symbol==="string"){const i=sessionQueue.findIndex(x=>x.symbol===event.data.symbol);if(i>=0)transitionToIndex(i);}
 });
