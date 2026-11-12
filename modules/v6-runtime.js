@@ -14,6 +14,7 @@ const app=document.getElementById("app"),rollingFrame=document.getElementById("r
 const logoFrame=document.getElementById("logo-frame"),timeframeFrame=document.getElementById("timeframe-frame");
 const klineHost=document.getElementById("kline-host"),STORAGE="vegas-v6-selected-timeframe",RANDOM_START="vegas-v6-last-random-start";
 let timeframe="4H",destroyed=false,logoIndex=0,rotationTimer=null,transitionTimer=null,interactionResumeTimer=null;
+let timeframeSwitchToken=0,pendingTimeframe=null;
 let signalBusy=false,quoteBusy=false,foregroundInterval=null,quoteAbort=null;
 const interactionLocks=new Set();
 try{const saved=localStorage.getItem(STORAGE);if(["1H","2H","4H","8H","D"].includes(saved))timeframe=saved}catch(_){}
@@ -41,17 +42,43 @@ lifecycle.listen(window,"unhandledrejection",event=>console.error("[VEGAS V6 unh
 lifecycle.listen(window,"error",event=>console.error("[VEGAS V6 runtime error]",event.message,event.filename,event.lineno));
 const feed=createV12Feed({isHidden:isRuntimeHidden}),ticker=createSignalTicker();
 function selectSymbol(symbol){const item=INSTRUMENTS.find(x=>x.symbol===symbol),contract=GATE_CONTRACTS[symbol];if(!item||!contract){console.warn("[VEGAS V6] Unknown symbol:",symbol);return false;}void controller.select(symbol,contract,timeframe);return true;}
-function switchTimeframe(next){if(!["1H","2H","4H","8H","D"].includes(next)||next===timeframe)return;timeframe=next;try{localStorage.setItem(STORAGE,next)}catch(_){}sendTimeframeState();sendLogoState();if(controller.state.contract)void controller.select(controller.state.symbol,controller.state.contract,timeframe);}
+function switchTimeframe(next){
+ if(!["1H","2H","4H","8H","D"].includes(next))return;
+ if(next===timeframe&&pendingTimeframe===null)return;
+ const token=++timeframeSwitchToken;
+ pendingTimeframe=next;
+ clearRotationTimers();
+ app.classList.add("is-symbol-transitioning");
+ transitionTimer=setTimeout(async()=>{
+  transitionTimer=null;
+  if(destroyed||isRuntimeHidden()||token!==timeframeSwitchToken)return;
+  const changed=next!==timeframe;
+  timeframe=next;
+  pendingTimeframe=null;
+  if(changed){
+   try{localStorage.setItem(STORAGE,next)}catch(_){}
+   sendTimeframeState();sendLogoState();
+   if(controller.state.contract)await controller.select(controller.state.symbol,controller.state.contract,timeframe);
+  }
+  if(destroyed||isRuntimeHidden()||token!==timeframeSwitchToken)return;
+  app.classList.remove("is-symbol-transitioning");
+  transitionTimer=setTimeout(()=>{
+   transitionTimer=null;
+   if(!destroyed&&!isRuntimeHidden()&&token===timeframeSwitchToken)scheduleSymbolRotation();
+  },1500);
+ },1500);
+}
 function clearRotationTimers(){if(rotationTimer!==null){clearTimeout(rotationTimer);rotationTimer=null;}if(transitionTimer!==null){clearTimeout(transitionTimer);transitionTimer=null;}}
 function scheduleSymbolRotation(){if(destroyed||isRuntimeHidden()||interactionLocks.size)return;clearRotationTimers();rotationTimer=setTimeout(()=>transitionToIndex((logoIndex+1)%sessionQueue.length),7000);}
 function transitionToIndex(index){
  if(destroyed||isRuntimeHidden()||interactionLocks.size||!sessionQueue.length)return;
+ timeframeSwitchToken++;pendingTimeframe=null;
  clearRotationTimers();logoIndex=((index%sessionQueue.length)+sessionQueue.length)%sessionQueue.length;
  app.classList.add("is-symbol-transitioning");sendLogoState();
  transitionTimer=setTimeout(()=>{if(destroyed||isRuntimeHidden())return;selectSymbol(sessionQueue[logoIndex].symbol);app.classList.remove("is-symbol-transitioning");transitionTimer=setTimeout(()=>{transitionTimer=null;scheduleSymbolRotation();},1500);},1500);
 }
 function startSymbolRotation(){if(destroyed||isRuntimeHidden())return;sendLogoState();scheduleSymbolRotation();}
-function stopSymbolRotation(){clearRotationTimers();app.classList.remove("is-symbol-transitioning");}
+function stopSymbolRotation(){timeframeSwitchToken++;pendingTimeframe=null;clearRotationTimers();app.classList.remove("is-symbol-transitioning");}
 async function refreshSignals(){
  if(destroyed||isRuntimeHidden()||signalBusy)return;signalBusy=true;
  try{const payload=await feed.read();if(!destroyed&&!isRuntimeHidden())ticker.render(payload);}
