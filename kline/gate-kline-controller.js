@@ -27,6 +27,14 @@ function aggregate2H(rows){
  return out;
 }
 function openDB(){return new Promise((resolve,reject)=>{if(!("indexedDB"in window))return reject(new Error("IndexedDB unavailable; durable K-line cache cannot start"));const q=indexedDB.open(DB_NAME,DB_VERSION);q.onupgradeneeded=()=>{const db=q.result;if(!db.objectStoreNames.contains(STORE)){const rows=db.createObjectStore(STORE,{keyPath:"id"});rows.createIndex("series","series",{unique:false})}if(!db.objectStoreNames.contains(META_STORE))db.createObjectStore(META_STORE,{keyPath:"id"});if(!db.objectStoreNames.contains(EMA_STORE)){const ema=db.createObjectStore(EMA_STORE,{keyPath:"id"});ema.createIndex("series","series",{unique:false})}if(!db.objectStoreNames.contains(LEGACY_STORE))db.createObjectStore(LEGACY_STORE,{keyPath:"id"})};q.onsuccess=()=>{q.result.onversionchange=()=>q.result.close();resolve(q.result)};q.onerror=()=>reject(q.error||new Error("IndexedDB open failed"));q.onblocked=()=>reject(new Error("IndexedDB upgrade blocked"))})}
+function emaSourceSignature(rows){
+ let a=2166136261,b=0x9e3779b9;
+ for(const row of rows){
+  const value=String(row.t)+":"+Number(row.c).toPrecision(15)+";";
+  for(let i=0;i<value.length;i++){const code=value.charCodeAt(i);a=Math.imul(a^code,16777619);b=Math.imul(b^code,2246822519)}
+ }
+ return rows.length+":"+((a>>>0).toString(16))+":"+((b>>>0).toString(16));
+}
 function calculateEmaRows(rows){
  const periods=[12,36,43,144,169,576,676],values=new Map();
  for(const period of periods){
@@ -45,10 +53,11 @@ async function ensureEmaSeries(key,rows,db){
   const fail=error=>{if(finished)return;finished=true;try{tx.abort()}catch(_){}reject(error||new Error("EMA cache transaction failed"))};
   const save=()=>{
    if(ready!==2||finished)return;
-   if(meta?.version===EMA_VERSION&&meta.candleCount===rows.length&&meta.newestTimestamp===rows[rows.length-1].t&&meta.newestClose===rows[rows.length-1].c&&count>=rows.length){finished=true;resolve(true);return}
+   const sourceSignature=emaSourceSignature(rows);
+   if(meta?.version===EMA_VERSION&&meta.candleCount===rows.length&&meta.oldestTimestamp===rows[0].t&&meta.newestTimestamp===rows[rows.length-1].t&&meta.newestClose===rows[rows.length-1].c&&meta.sourceSignature===sourceSignature&&count===rows.length){finished=true;resolve(true);return}
    const values=calculateEmaRows(rows);
-   for(let i=0;i<rows.length;i++){const record={id:key+"|"+rows[i].t,series:key,t:rows[i].t};for(const period of [12,36,43,144,169,576,676]){const value=values.get(period)[i];record["e"+period]=Number.isFinite(value)?value:null}store.put(record)}
-   metaStore.put({id:"ema|"+key,version:EMA_VERSION,candleCount:rows.length,oldestTimestamp:rows[0].t,newestTimestamp:rows[rows.length-1].t,newestClose:rows[rows.length-1].c,periods:[12,36,43,144,169,576,676],updatedAt:Date.now()});
+   for(let i=0;i<rows.length;i++){const record={id:key+"|"+rows[i].t,series:key,t:rows[i].t,sourceClose:rows[i].c};for(const period of [12,36,43,144,169,576,676]){const value=values.get(period)[i];record["e"+period]=Number.isFinite(value)?value:null}store.put(record)}
+   metaStore.put({id:"ema|"+key,version:EMA_VERSION,candleCount:rows.length,oldestTimestamp:rows[0].t,newestTimestamp:rows[rows.length-1].t,newestClose:rows[rows.length-1].c,sourceSignature,periods:[12,36,43,144,169,576,676],updatedAt:Date.now()});
   };
   metaReq.onsuccess=()=>{meta=metaReq.result||null;ready++;save()};countReq.onsuccess=()=>{count=countReq.result;ready++;save()};
   metaReq.onerror=countReq.onerror=()=>fail(tx.error);tx.oncomplete=()=>{if(!finished){finished=true;resolve(true)}};tx.onerror=tx.onabort=()=>fail(tx.error);
@@ -64,18 +73,19 @@ async function updateLatestEma(key,rows,db){
   const full=()=>{needsFull=true;try{tx.abort()}catch(_){}};
   metaReq.onsuccess=()=>{
    meta=metaReq.result||null;ready=true;
-   if(!meta||meta.version!==EMA_VERSION||!meta.candleCount||rows.length<meta.candleCount||rows.length>meta.candleCount+1){full();return}
-   const last=rows[rows.length-1],same=meta.newestTimestamp===last.t;
-   if(same&&meta.newestClose===last.c){finished=true;resolve(true);return}
+   if(!meta||meta.version!==EMA_VERSION||!meta.candleCount){full();return}
+   const sourceSignature=emaSourceSignature(rows),last=rows[rows.length-1],same=meta.newestTimestamp===last.t;
+   if(meta.sourceSignature===sourceSignature&&meta.candleCount===rows.length){finished=true;resolve(true);return}
+   if(rows.length!==meta.candleCount+1||same||meta.sourceSignature!==emaSourceSignature(rows.slice(0,-1))){full();return}
    const previousTime=rows[rows.length-2]?.t,previousReq=previousTime?store.get(key+"|"+previousTime):null;
    const apply=record=>{
-    const output={id:key+"|"+last.t,series:key,t:last.t};
+    const output={id:key+"|"+last.t,series:key,t:last.t,sourceClose:last.c};
     for(const period of [12,36,43,144,169,576,676]){
      let value=null;
      if(rows.length>=period){if(rows.length===period){let sum=0;for(let i=0;i<period;i++)sum+=rows[i].c;value=sum/period}else{const prior=Number(record?.["e"+period]);if(Number.isFinite(prior)){const alpha=2/(period+1);value=last.c*alpha+prior*(1-alpha)}}}
      output["e"+period]=Number.isFinite(value)?value:null;
     }
-    store.put(output);metaStore.put({...meta,id:"ema|"+key,candleCount:rows.length,newestTimestamp:last.t,newestClose:last.c,updatedAt:Date.now()});
+    store.put(output);metaStore.put({...meta,id:"ema|"+key,candleCount:rows.length,newestTimestamp:last.t,newestClose:last.c,sourceSignature,updatedAt:Date.now()});
    };
    if(previousReq){previousReq.onsuccess=()=>apply(previousReq.result);previousReq.onerror=()=>fail(tx.error)}else apply(null);
   };
