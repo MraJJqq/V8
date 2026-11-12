@@ -4,17 +4,81 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>周期切换</title>
-<link rel="stylesheet" href="./responsive.css?v=v6-static-20261111-3">
 <style>
-@font-face{font-family:'Chakra Petch';src:url('../../assets/fonts/ChakraPetch-Bold.ttf') format('truetype');font-style:normal;font-weight:700;font-display:swap}
-:root{--ink:#e8f0ff;--mute:#7f8db0;--up:#2ee6a6;color-scheme:dark}
-*{box-sizing:border-box}
-html,body{width:100%;height:100%;margin:0;overflow:hidden;background:transparent;font-family:'Chakra Petch',ui-sans-serif,system-ui,sans-serif;-webkit-user-select:none;user-select:none}
-.tf{position:absolute;inset:0 auto 0 0;width:100%;height:100%;display:flex;flex-direction:column;align-items:flex-start;justify-content:space-evenly;gap:0;perspective:700px}
-.tf button{border:0;background:none;padding:0 clamp(4px,1vw,8px);width:auto;height:15%;min-height:0;font:700 clamp(28px,4.3vh,44px)/1.05 'Chakra Petch',sans-serif;color:var(--mute);cursor:pointer;transform-style:preserve-3d;-webkit-tap-highlight-color:transparent;
-  transition:font-size .35s cubic-bezier(.2,.8,.2,1),color .35s,transform .35s cubic-bezier(.2,.8,.2,1),filter .35s}
-.tf button[aria-pressed="true"]{font-size:clamp(42px,6.45vh,66px);color:var(--ink);transform:translateZ(24px);filter:drop-shadow(0 0 12px rgba(46,230,166,.7)) drop-shadow(0 10px 14px rgba(0,0,0,.6))}
-.tf button:focus-visible{outline:2px solid var(--up);outline-offset:2px;border-radius:8px}
+@font-face {
+  font-family: 'Chakra Petch';
+  src: url('../../assets/fonts/ChakraPetch-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-display: swap;
+}
+:root {
+  --ink: #e8f0ff;
+  --mute: #7f8db0;
+  --up: #2ee6a6;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: transparent;
+  font-family: 'Chakra Petch', sans-serif;
+  user-select: none;
+}
+.tf {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: auto;
+  height: 46%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 0;
+  perspective: 700px;
+  overflow-y: auto;
+  scroll-snap-type: y mandatory;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  scrollbar-width: none;
+}
+.tf::-webkit-scrollbar { display: none; }
+.tf button {
+  border: 0;
+  background: none;
+  padding: 0 clamp(4px, 1vw, 8px);
+  width: auto;
+  height: 20%;
+  min-height: 0;
+  flex: 0 0 20%;
+  scroll-snap-align: center;
+  font: 700 clamp(28px, 4.3vh, 44px)/1.05 'Chakra Petch', sans-serif;
+  color: var(--mute);
+  cursor: pointer;
+  transform-style: preserve-3d;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    font-size .35s cubic-bezier(.2,.8,.2,1),
+    color .35s,
+    transform .35s cubic-bezier(.2,.8,.2,1),
+    filter .35s;
+}
+.tf button[aria-pressed="true"] {
+  font-size: clamp(42px, 6.45vh, 66px);
+  color: var(--ink);
+  transform: translateZ(24px);
+  filter:
+    drop-shadow(0 0 12px rgba(46,230,166,.7))
+    drop-shadow(0 10px 14px rgba(0,0,0,.6));
+}
+.tf button:focus-visible {
+  outline: 2px solid var(--up);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
 </style>
 </head>
 <body>
@@ -26,21 +90,84 @@ html,body{width:100%;height:100%;margin:0;overflow:hidden;background:transparent
   <button aria-pressed="false">D</button>
 </div>
 <script>
-const bs=[...document.querySelectorAll('.tf button')];
-function setTimeframe(value){bs.forEach(b=>{const active=b.textContent.trim()===value;b.setAttribute("aria-pressed",String(active));b.style.transform="";});}
-window.addEventListener("message",event=>{if(event.origin!==location.origin||event.source!==window.parent)return;const data=event.data;if(!data||typeof data!=="object"||data.type!=="VEGAS_TIMEFRAME_SET"||!["1H","2H","4H","8H","D"].includes(data.timeframe))return;setTimeframe(data.timeframe);});
-const base=b=>b.getAttribute('aria-pressed')==='true'?(matchMedia('(orientation:landscape)').matches?'translateZ(16px)':'translateZ(24px)'):'';
-bs.forEach(b=>{
-  b.addEventListener('click',()=>{
-    bs.forEach(o=>{o.setAttribute('aria-pressed',o===b);o.style.transform=''});
-    window.parent.postMessage({type:"VEGAS_TIMEFRAME_SELECT",timeframe:b.textContent.trim()},location.origin);
+(() => {
+  const tf = document.querySelector('.tf');
+  const src = [...tf.querySelectorAll('button')];
+  const n = src.length;
+  const valid = ['1H', '2H', '4H', '8H', 'D'];
+  const pressedIdx = Math.max(0, src.findIndex(b => b.getAttribute('aria-pressed') === 'true'));
+
+  const clone = () => src.map(b => b.cloneNode(true));
+  tf.prepend(...clone(), ...clone());
+  tf.append(...clone(), ...clone());
+  const all = [...tf.querySelectorAll('button')];
+
+  const centerOf = i => all[i].offsetTop + all[i].offsetHeight / 2 - tf.clientHeight / 2;
+  const H = () => all[n].offsetTop - all[0].offsetTop;
+  let selected = '';
+
+  const mark = (notify = true) => {
+    const mid = tf.scrollTop + tf.clientHeight / 2;
+    let best = 0, d = Infinity;
+    all.forEach((b, i) => {
+      const x = Math.abs(b.offsetTop + b.offsetHeight / 2 - mid);
+      if (x < d) { d = x; best = i; }
+    });
+    const key = all[best].textContent.trim();
+    all.forEach(b => b.setAttribute('aria-pressed', b.textContent.trim() === key));
+    if (notify && key !== selected) {
+      selected = key;
+      window.parent.postMessage({ type: 'VEGAS_TIMEFRAME_SELECT', timeframe: key }, location.origin);
+    } else if (!selected) {
+      selected = key;
+    }
+  };
+
+  const wrap = () => {
+    const h = H();
+    if (tf.scrollTop < h * 1.5) tf.scrollTop += h;
+    else if (tf.scrollTop > h * 2.5) tf.scrollTop -= h;
+  };
+
+  let timer;
+  tf.addEventListener('scroll', () => {
+    mark();
+    clearTimeout(timer);
+    timer = setTimeout(wrap, 120);
+  }, { passive: true });
+
+  tf.addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    tf.scrollTo({ top: centerOf(all.indexOf(b)), behavior: 'smooth' });
   });
-  b.addEventListener('pointermove',e=>{
-    const r=b.getBoundingClientRect(),x=(e.clientX-r.left)/r.width,y=(e.clientY-r.top)/r.height;
-    b.style.transform=`${base(b)} rotateX(${(.5-y)*18}deg) rotateY(${(x-.5)*18}deg)`;
+
+  const setFromParent = value => {
+    if (!valid.includes(value)) return;
+    const mid = tf.scrollTop + tf.clientHeight / 2;
+    let best = -1, d = Infinity;
+    all.forEach((b, i) => {
+      if (b.textContent.trim() !== value) return;
+      const x = Math.abs(b.offsetTop + b.offsetHeight / 2 - mid);
+      if (x < d) { d = x; best = i; }
+    });
+    if (best >= 0) {
+      selected = value;
+      all.forEach(b => b.setAttribute('aria-pressed', b.textContent.trim() === value));
+      tf.scrollTo({ top: centerOf(best), behavior: 'auto' });
+    }
+  };
+
+  window.addEventListener('message', event => {
+    if (event.origin !== location.origin || event.source !== window.parent) return;
+    const data = event.data;
+    if (!data || typeof data !== 'object' || data.type !== 'VEGAS_TIMEFRAME_SET') return;
+    setFromParent(data.timeframe);
   });
-  b.addEventListener('pointerleave',()=>{b.style.transform=''});
-});
+
+  tf.scrollTop = centerOf(2 * n + pressedIdx);
+  mark(false);
+})();
 </script>
 </body>
 </html>

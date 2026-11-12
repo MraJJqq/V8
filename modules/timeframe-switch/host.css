@@ -13,4 +13,15 @@
  isolation:isolate;
  pointer-events:auto!important;
 }
+/* Give the embedded wheel a full viewport so its internal 46% height is screen-relative. */
+#app #timeframe-frame{
+ height:calc(100vh - var(--v6-safe-bottom, 0px))!important;
+ max-height:calc(100vh - var(--v6-safe-bottom, 0px))!important;
+}
+@supports (height:100dvh){
+ #app #timeframe-frame{
+  height:calc(100dvh - var(--v6-safe-bottom, 0px))!important;
+  max-height:calc(100dvh - var(--v6-safe-bottom, 0px))!important;
+ }
+}
 #timeframe-frame.is-ready{opacity:1!important}
