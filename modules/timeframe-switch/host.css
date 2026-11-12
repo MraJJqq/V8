@@ -10,12 +10,12 @@
  opacity:0;
  transition:opacity .12s ease-out;
  overflow:hidden!important;
- clip-path:inset(54% 0 0 0);
- -webkit-clip-path:inset(54% 0 0 0);
+ clip-path:inset(68.83% 0 0 0);
+ -webkit-clip-path:inset(68.83% 0 0 0);
  isolation:isolate;
  pointer-events:auto!important;
 }
-/* Give the embedded wheel a full viewport so its internal 46% height is screen-relative. */
+/* Give the embedded wheel a full viewport so its internal 31.17% height is screen-relative. */
 #app #timeframe-frame{
  height:calc(100vh - var(--v6-safe-bottom, 0px))!important;
  max-height:calc(100vh - var(--v6-safe-bottom, 0px))!important;
