@@ -165,8 +165,8 @@ controller = (ROOT / "kline/gate-kline-controller.js").read_text(encoding="utf-8
 for label, source in (("timeframe selector", timeframe), ("runtime", runtime), ("logo countdown", logo), ("K-line controller", controller)):
     if '"2H"' not in source and '>2H<' not in source:
         fail(f"{label} does not include the 2H timeframe")
-if 'height:15%' not in timeframe:
-    fail("five timeframe buttons do not use equal 15% height")
+if not re.search(r"height:\s*20%", timeframe) or not re.search(r"flex:\s*0\s+0\s+20%", timeframe):
+    fail("five timeframe buttons do not use equal 20% height")
 if 'function aggregate2H' not in controller or 'INTERVALS=Object.freeze({"1H":"1h","2H":"1h"' not in controller:
     fail("2H aggregation from Gate 1H candles is missing")
 
