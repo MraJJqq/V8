@@ -235,8 +235,8 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
    }
   }finally{
    queueRunning=false;
-   if(canWork())forceLatestSweep=false;
    if(queueRestartRequested&&canWork()){queueRestartRequested=false;void runHistoryQueue()}
+   else if(canWork())forceLatestSweep=false;
   }
  }
  function startHistoryQueue(forceLatest=false){if(stopped||paused||isHidden())return;if(forceLatest)forceLatestSweep=true;if(queueRunning){if(forceLatest)queueRestartRequested=true;return;}void runHistoryQueue()}
