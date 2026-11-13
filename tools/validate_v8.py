@@ -95,11 +95,11 @@ for old_name in ("universe-v4.js", "page-lifecycle-v4.js",
     if (ROOT / "modules/shared" / old_name).exists() or (ROOT / "kline" / old_name).exists():
         fail(f"legacy module file remains: {old_name}")
 
-runtime = (ROOT / "modules/v6-runtime.js").read_text(encoding="utf-8")
+runtime = (ROOT / "modules/v8-runtime.js").read_text(encoding="utf-8")
 if "universe-v6.js" not in runtime or "page-lifecycle-v6.js" not in runtime:
-    fail("runtime is not wired exclusively to V6 shared modules")
-if "createV6KlineView" not in runtime:
-    fail("runtime is not wired to the V6 K-line view")
+    fail("runtime is not wired exclusively to V8 shared modules")
+if "createV8KlineView" not in runtime:
+    fail("runtime is not wired to the V8 K-line view")
 
 # Guard the global layout contract: Logo outer geometry must live only in the
 # global full-screen system, never in a Logo-specific host stylesheet.
@@ -121,29 +121,29 @@ if min(latest_write, latest_ema, gap_repair) < 0 or not (latest_write < latest_e
     fail("latest candles and EMA must be persisted before independent historical gap repair")
 if "latest-verified" not in controller:
     fail("successful gap repair does not mark the series verified")
-if 'DB_NAME="vegas-v6-market-cache"' not in controller:
-    fail("Gate IndexedDB namespace is not V6-isolated")
+if 'DB_NAME="vegas-v8-market-cache"' not in controller:
+    fail("Gate IndexedDB namespace is not V8-isolated")
 
 controller = (ROOT / "kline/gate-kline-controller.js").read_text(encoding="utf-8")
 if 'DB_VERSION=3' not in controller or 'META_STORE="seriesMeta"' not in controller or 'EMA_STORE="emaRows"' not in controller:
-    fail("V6 persistent EMA cache schema version 3 is missing")
+    fail("V8 persistent EMA cache schema version 3 is missing")
 if "ensureEmaSeries" not in controller or "updateLatestEma" not in controller:
-    fail("V6 full-history and incremental EMA cache handling is missing")
+    fail("V8 full-history and incremental EMA cache handling is missing")
 if "MEMORY_MAX_PER_SERIES=12000" not in controller or "MEMORY_MAX_TOTAL=30000" not in controller:
-    fail("V6 volatile cache bounds are missing")
+    fail("V8 volatile cache bounds are missing")
 if 'createIndex("series","series"' not in controller or 'rowsStore.put({id:key+"|"+c.t,series:key,...c})' not in controller:
-    fail("V6 per-candle IndexedDB storage is missing")
+    fail("V8 per-candle IndexedDB storage is missing")
 if "navigator.storage?.estimate" not in controller or "cache-storage-pressure" not in controller:
-    fail("V6 browser storage pressure monitoring is missing")
+    fail("V8 browser storage pressure monitoring is missing")
 if "memoryCacheIncomplete" not in controller:
-    fail("V6 fallback cache eviction can incorrectly mark partial history complete")
+    fail("V8 fallback cache eviction can incorrectly mark partial history complete")
 if "discardedLegacyArray" not in controller:
-    fail("V6 legacy cache migration may retain a duplicate full candle array in metadata")
+    fail("V8 legacy cache migration may retain a duplicate full candle array in metadata")
 
 
 # All static CSS/JS entry resources use one cache-busting release token.
-STATIC_ASSET_VERSION = "v6-static-20261112-3"
-KLINE_SYNC_VERSION = "v6-kline-recovery-20261113-1"
+STATIC_ASSET_VERSION = "v8-static-20261112-3"
+KLINE_SYNC_VERSION = "v8-kline-pause-20261113-1"
 static_versions = set()
 for page in html_files:
     source = page.read_text(encoding="utf-8")
@@ -151,13 +151,20 @@ for page in html_files:
         static_versions.add(match.group(2))
 if static_versions != {STATIC_ASSET_VERSION, KLINE_SYNC_VERSION}:
     fail(f"static CSS/JS cache versions are not unified: {sorted(static_versions)}")
-if f'modules/v6-runtime.js?v={KLINE_SYNC_VERSION}' not in (ROOT / "index.html").read_text(encoding="utf-8"):
-    fail("V6 runtime entry cache version is not refreshed for synchronized K-line rendering")
-runtime_source = (ROOT / "modules/v6-runtime.js").read_text(encoding="utf-8")
-if f'v6-kline-view.js?v={KLINE_SYNC_VERSION}' not in runtime_source:
-    fail("V6 K-line view import cache version is not refreshed")
+if f'modules/v8-runtime.js?v={KLINE_SYNC_VERSION}' not in (ROOT / "index.html").read_text(encoding="utf-8"):
+    fail("V8 runtime entry cache version is not refreshed for synchronized K-line rendering")
+runtime_source = (ROOT / "modules/v8-runtime.js").read_text(encoding="utf-8")
+if f'v8-kline-view.js?v={KLINE_SYNC_VERSION}' not in runtime_source:
+    fail("V8 K-line view import cache version is not refreshed")
 if f'gate-kline-controller.js?v={KLINE_SYNC_VERSION}' not in runtime_source:
     fail("Gate K-line controller import cache version is not refreshed")
+if f'kline-rotation-pause.js?v={KLINE_SYNC_VERSION}' not in runtime_source:
+    fail("independent K-line rotation pause controller is not imported")
+pause_controller = (ROOT / "modules/kline-rotation-pause.js").read_text(encoding="utf-8")
+if "createKlineRotationPause" not in pause_controller or "<=320" not in pause_controller or ">4" not in pause_controller:
+    fail("K-line double-tap pause recognition rules are incomplete")
+if "userRotationPaused" not in runtime_source:
+    fail("K-line and Logo user pause state is not isolated from interaction locks")
 
 
 controller = (ROOT / "kline/gate-kline-controller.js").read_text(encoding="utf-8")
@@ -172,9 +179,16 @@ if "persistRepairTask" not in controller or 'id:"repairTask|"+key' not in contro
 if "scheduleHistoryRetry" not in controller or "historyRetryTimer" not in controller:
     fail("failed repair tasks do not retry automatically while the page remains active")
 
+if errors:
+    print("V8 validation FAILED:")
+    for error in errors:
+        print(" -", error)
+    sys.exit(1)
+print(f"V8 validation passed: {len(html_files)} HTML files; local references, inline scripts, CSS, imports, namespaces and dependencies checked.")
+
 # The shared timeframe system is fixed to five periods, including 2H aggregation.
 timeframe = (ROOT / "modules/timeframe-switch/index.html").read_text(encoding="utf-8")
-runtime = (ROOT / "modules/v6-runtime.js").read_text(encoding="utf-8")
+runtime = (ROOT / "modules/v8-runtime.js").read_text(encoding="utf-8")
 logo = (ROOT / "modules/logo/logo.js").read_text(encoding="utf-8")
 controller = (ROOT / "kline/gate-kline-controller.js").read_text(encoding="utf-8")
 for label, source in (("timeframe selector", timeframe), ("runtime", runtime), ("logo countdown", logo), ("K-line controller", controller)):
@@ -184,10 +198,3 @@ if not re.search(r"height:\s*20%", timeframe) or not re.search(r"flex:\s*0\s+0\s
     fail("five timeframe buttons do not use equal 20% height")
 if 'function aggregate2H' not in controller or 'INTERVALS=Object.freeze({"1H":"1h","2H":"1h"' not in controller:
     fail("2H aggregation from Gate 1H candles is missing")
-
-if errors:
-    print("V8 validation FAILED:")
-    for error in errors:
-        print(" -", error)
-    sys.exit(1)
-print(f"V8 validation passed: {len(html_files)} HTML files; local references, inline scripts, CSS, imports, namespaces and dependencies checked.")
