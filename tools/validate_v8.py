@@ -160,7 +160,9 @@ if f'v6-kline-view.js?v={KLINE_SYNC_VERSION}' not in runtime_source:
 
 controller = (ROOT / "kline/gate-kline-controller.js").read_text(encoding="utf-8")
 if "start+7200<=currentHour" not in controller or "items.length===2" not in controller:
-    fail("2H aggregation must require both aligned 1H candles and a closed 2H bucket")
+    fail("historical 2H buckets must require both aligned 1H candles")
+if "items.length===1&&isCurrent&&first.t===currentHour" not in controller:
+    fail("the active 2H bucket must preserve its current partial 1H candle")
 if 'page=await older(c,tf,rows[0].t);' not in controller:
     fail("historical boundary must be independently confirmed")
 if "persistRepairTask" not in controller or 'id:"repairTask|"+key' not in controller:

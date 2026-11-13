@@ -15,13 +15,15 @@ function aggregate2H(rows){
   if(!groups.has(start))groups.set(start,[]);
   groups.get(start).push(candle);
  }
- const currentHour=Math.floor(Date.now()/3600000)*3600,out=[];
+ const currentHour=Math.floor(Date.now()/3600000)*3600,currentBucket=Math.floor(currentHour/7200)*7200,out=[];
  for(const [start,items] of groups){
   items.sort((a,b)=>a.t-b.t);
-  const first=items[0],second=items[1];
-  // A 2H candle is valid only when both aligned 1H candles exist and the bucket has closed.
-  if(start+7200<=currentHour&&items.length===2&&first.t===start&&second.t===start+3600){
+  const first=items[0],second=items[1],isCurrent=start===currentBucket;
+  // Historical buckets require both closed 1H candles; the active bucket may use only its current Gate 1H candle.
+  if(items.length===2&&first.t===start&&second.t===start+3600&&(start+7200<=currentHour||(isCurrent&&second.t===currentHour))){
    out.push({t:start,o:first.o,h:Math.max(first.h,second.h),l:Math.min(first.l,second.l),c:second.c});
+  }else if(items.length===1&&isCurrent&&first.t===currentHour){
+   out.push({t:start,o:first.o,h:first.h,l:first.l,c:first.c});
   }
  }
  return out;
