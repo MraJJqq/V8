@@ -4,8 +4,9 @@ import { INSTRUMENTS, createSessionQueue } from "./shared/universe-v6.js";
 import { createV12Feed } from "./signal-ticker/v12-feed.js";
 import { createSignalTicker } from "./signal-ticker/ticker.js";
 import { GATE_CONTRACTS } from "./shared/universe-v6.js";
-import { createV6KlineView } from "../kline/v6-kline-view.js?v=v6-kline-recovery-20261113-1";
-import { createGateKlineController } from "../kline/gate-kline-controller.js?v=v6-kline-recovery-20261113-1";
+import { createV6KlineView } from "../kline/v6-kline-view.js?v=v6-kline-pause-20261113-1";
+import { createGateKlineController } from "../kline/gate-kline-controller.js?v=v6-kline-pause-20261113-1";
+import { createKlineRotationPause } from "./kline-rotation-pause.js?v=v6-kline-pause-20261113-1";
 
 const lifecycle=createLifecycleScope();
 let pageLifecycle=null;
@@ -13,7 +14,7 @@ const isRuntimeHidden=()=>pageLifecycle?pageLifecycle.isSuspended():document.hid
 const app=document.getElementById("app"),rollingFrame=document.getElementById("rolling-cards-frame");
 const logoFrame=document.getElementById("logo-frame"),timeframeFrame=document.getElementById("timeframe-frame");
 const klineHost=document.getElementById("kline-host"),STORAGE="vegas-v6-selected-timeframe",RANDOM_START="vegas-v6-last-random-start";
-let timeframe="4H",destroyed=false,logoIndex=0,rotationTimer=null,transitionTimer=null,interactionResumeTimer=null;
+let timeframe="4H",destroyed=false,logoIndex=0,rotationTimer=null,transitionTimer=null,interactionResumeTimer=null,userRotationPaused=false;
 let timeframeSwitchToken=0,pendingTimeframe=null;
 let signalBusy=false,quoteBusy=false,foregroundInterval=null,quoteAbort=null;
 const interactionLocks=new Set();
@@ -34,9 +35,20 @@ function setInteractionLock(source,active){
  if(active){interactionLocks.add(source);if(interactionResumeTimer!==null){clearTimeout(interactionResumeTimer);interactionResumeTimer=null;}if(rotationTimer!==null){clearTimeout(rotationTimer);rotationTimer=null;}return;}
  interactionLocks.delete(source);
  if(interactionLocks.size||interactionResumeTimer!==null||transitionTimer!==null)return;
- interactionResumeTimer=setTimeout(()=>{interactionResumeTimer=null;if(!destroyed&&!isRuntimeHidden()&&!interactionLocks.size)scheduleSymbolRotation();},0);
+ interactionResumeTimer=setTimeout(()=>{interactionResumeTimer=null;if(!destroyed&&!isRuntimeHidden()&&!interactionLocks.size&&!userRotationPaused)scheduleSymbolRotation();},0);
 }
 const view=createV6KlineView({host:klineHost,onInteractionChange:setInteractionLock});
+function setUserRotationPaused(paused){
+ if(userRotationPaused===paused)return;
+ userRotationPaused=paused;
+ if(paused){
+  if(rotationTimer!==null){clearTimeout(rotationTimer);rotationTimer=null;}
+  if(interactionResumeTimer!==null){clearTimeout(interactionResumeTimer);interactionResumeTimer=null;}
+  return;
+ }
+ if(!destroyed&&!isRuntimeHidden()&&!interactionLocks.size&&transitionTimer===null)scheduleSymbolRotation();
+}
+const rotationPause=createKlineRotationPause({target:klineHost,onToggle:()=>setUserRotationPaused(!userRotationPaused)});
 const controller=createGateKlineController({frame:{contentWindow:view},instruments:GATE_INSTRUMENTS,isHidden:isRuntimeHidden,onState:s=>{if(s.status==="request-failed"||s.status==="cache-unavailable"||s.status==="cache-write-failed")console.warn("[VEGAS V6 data]",s);}});
 lifecycle.listen(window,"unhandledrejection",event=>console.error("[VEGAS V6 unhandled rejection]",event.reason));
 lifecycle.listen(window,"error",event=>console.error("[VEGAS V6 runtime error]",event.message,event.filename,event.lineno));
@@ -69,7 +81,7 @@ function switchTimeframe(next){
  },1500);
 }
 function clearRotationTimers(){if(rotationTimer!==null){clearTimeout(rotationTimer);rotationTimer=null;}if(transitionTimer!==null){clearTimeout(transitionTimer);transitionTimer=null;}}
-function scheduleSymbolRotation(){if(destroyed||isRuntimeHidden()||interactionLocks.size)return;clearRotationTimers();rotationTimer=setTimeout(()=>transitionToIndex((logoIndex+1)%sessionQueue.length),7000);}
+function scheduleSymbolRotation(){if(destroyed||isRuntimeHidden()||interactionLocks.size||userRotationPaused)return;clearRotationTimers();rotationTimer=setTimeout(()=>transitionToIndex((logoIndex+1)%sessionQueue.length),7000);}
 function transitionToIndex(index){
  if(destroyed||isRuntimeHidden()||interactionLocks.size||!sessionQueue.length)return;
  timeframeSwitchToken++;pendingTimeframe=null;
@@ -112,7 +124,7 @@ function startForegroundTimers(){if(destroyed||isRuntimeHidden())return;if(!fore
 function stopForegroundTimers(){foregroundInterval?.();foregroundInterval=null;quoteAbort?.abort();quoteAbort=null;}
 function suspendRuntime(){if(destroyed)return;interactionLocks.clear();if(interactionResumeTimer!==null){clearTimeout(interactionResumeTimer);interactionResumeTimer=null;}document.documentElement.classList.add("vegas-page-hidden");stopForegroundTimers();stopSymbolRotation();controller.suspend();feed.suspend();ticker.setPaused(true);}
 function resumeRuntime(){if(destroyed||isRuntimeHidden())return;document.documentElement.classList.remove("vegas-page-hidden");feed.resume();ticker.setPaused(false);controller.resume();startForegroundTimers();startSymbolRotation();refreshSignals();refreshCardQuotes();}
-function teardown(){if(destroyed)return;destroyed=true;if(interactionResumeTimer!==null)clearTimeout(interactionResumeTimer);interactionLocks.clear();pageLifecycle?.destroy();stopForegroundTimers();stopSymbolRotation();ticker.destroy();feed.destroy();controller.destroy();view.destroy();lifecycle.destroy();}
+function teardown(){if(destroyed)return;destroyed=true;if(interactionResumeTimer!==null)clearTimeout(interactionResumeTimer);interactionLocks.clear();pageLifecycle?.destroy();stopForegroundTimers();stopSymbolRotation();ticker.destroy();feed.destroy();controller.destroy();rotationPause.destroy();view.destroy();lifecycle.destroy();}
 pageLifecycle=createPageLifecycle({documentRef:document,windowRef:window,onSuspend:suspendRuntime,onResume:resumeRuntime,onPageHideFinal:teardown});
 document.documentElement.classList.toggle("vegas-page-hidden",isRuntimeHidden());
 lifecycle.listen(window,"beforeunload",teardown,{once:true});
