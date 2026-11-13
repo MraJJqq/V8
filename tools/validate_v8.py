@@ -143,7 +143,7 @@ if "discardedLegacyArray" not in controller:
 
 # All static CSS/JS entry resources use one cache-busting release token.
 STATIC_ASSET_VERSION = "v6-static-20261112-3"
-KLINE_SYNC_VERSION = "v6-kline-sync-2"
+KLINE_SYNC_VERSION = "v6-kline-recovery-20261113-1"
 static_versions = set()
 for page in html_files:
     source = page.read_text(encoding="utf-8")
@@ -156,6 +156,8 @@ if f'modules/v6-runtime.js?v={KLINE_SYNC_VERSION}' not in (ROOT / "index.html").
 runtime_source = (ROOT / "modules/v6-runtime.js").read_text(encoding="utf-8")
 if f'v6-kline-view.js?v={KLINE_SYNC_VERSION}' not in runtime_source:
     fail("V6 K-line view import cache version is not refreshed")
+if f'gate-kline-controller.js?v={KLINE_SYNC_VERSION}' not in runtime_source:
+    fail("Gate K-line controller import cache version is not refreshed")
 
 
 controller = (ROOT / "kline/gate-kline-controller.js").read_text(encoding="utf-8")
