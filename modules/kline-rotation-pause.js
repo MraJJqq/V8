@@ -25,12 +25,16 @@ export function createKlineRotationPause({target,onToggle}) {
   if(lastTapAt>0&&now>=lastTapAt&&now-lastTapAt<=320){lastTapAt=0;onToggle();}
   else lastTapAt=now;
  }
- function cancel(){active.clear();lastTapAt=0;}
+ function cancel(event){
+  if(!active.has(event.pointerId))return;
+  active.delete(event.pointerId);
+  invalidateGesture();
+ }
  target.addEventListener("pointerdown",down,{capture:true,signal});
  target.addEventListener("pointermove",move,{capture:true,signal});
  target.addEventListener("pointerup",finish,{capture:true,signal});
  target.addEventListener("pointercancel",cancel,{capture:true,signal});
  target.addEventListener("lostpointercapture",cancel,{capture:true,signal});
- function destroy(){if(destroyed)return;destroyed=true;cancel();abort.abort();}
+ function destroy(){if(destroyed)return;destroyed=true;active.clear();lastTapAt=0;abort.abort();}
  return Object.freeze({destroy});
 }
