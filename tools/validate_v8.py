@@ -157,6 +157,17 @@ runtime_source = (ROOT / "modules/v6-runtime.js").read_text(encoding="utf-8")
 if f'v6-kline-view.js?v={KLINE_SYNC_VERSION}' not in runtime_source:
     fail("V6 K-line view import cache version is not refreshed")
 
+
+controller = (ROOT / "kline/gate-kline-controller.js").read_text(encoding="utf-8")
+if "start+7200<=currentHour" not in controller or "items.length===2" not in controller:
+    fail("2H aggregation must require both aligned 1H candles and a closed 2H bucket")
+if 'page=await older(c,tf,rows[0].t);' not in controller:
+    fail("historical boundary must be independently confirmed")
+if "persistRepairTask" not in controller or 'id:"repairTask|"+key' not in controller:
+    fail("failed repair tasks are not persisted in IndexedDB")
+if "scheduleHistoryRetry" not in controller or "historyRetryTimer" not in controller:
+    fail("failed repair tasks do not retry automatically while the page remains active")
+
 # The shared timeframe system is fixed to five periods, including 2H aggregation.
 timeframe = (ROOT / "modules/timeframe-switch/index.html").read_text(encoding="utf-8")
 runtime = (ROOT / "modules/v6-runtime.js").read_text(encoding="utf-8")

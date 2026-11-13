@@ -15,13 +15,13 @@ function aggregate2H(rows){
   if(!groups.has(start))groups.set(start,[]);
   groups.get(start).push(candle);
  }
- const currentHour=Math.floor(Date.now()/3600000)*3600,currentBucket=Math.floor(currentHour/7200)*7200,out=[];
+ const currentHour=Math.floor(Date.now()/3600000)*3600,out=[];
  for(const [start,items] of groups){
   items.sort((a,b)=>a.t-b.t);
-  if(items.length===2&&items[0].t===start&&items[1].t===start+3600){
-   out.push({t:start,o:items[0].o,h:Math.max(items[0].h,items[1].h),l:Math.min(items[0].l,items[1].l),c:items[1].c});
-  }else if(items.length===1&&start===currentBucket&&items[0].t===currentHour){
-   out.push({t:start,o:items[0].o,h:items[0].h,l:items[0].l,c:items[0].c});
+  const first=items[0],second=items[1];
+  // A 2H candle is valid only when both aligned 1H candles exist and the bucket has closed.
+  if(start+7200<=currentHour&&items.length===2&&first.t===start&&second.t===start+3600){
+   out.push({t:start,o:first.o,h:Math.max(first.h,second.h),l:Math.min(first.l,second.l),c:second.c});
   }
  }
  return out;
@@ -106,8 +106,8 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
  }
  let symbol="",contract="",timeframe="4H",candles=[],complete=false,ws=null,retryTimer=0,pingTimer=0,stopped=false,selection=0,contractsPromise=null,wsSubscription=null,writeTimer=0;
  const pendingWrites=new Map(),requestControllers=new Set(),latestJobs=new Map(),latestCheckedAt=new Map();
- let queueRunning=false,queueRestartRequested=false,paused=false;
- const completed=new Set(),failed=new Map();
+ let queueRunning=false,queueRestartRequested=false,paused=false,historyRetryTimer=0;
+ const completed=new Set(),failed=new Map(),retryAttempts=new Map();
  let forceLatestSweep=false;
  const canWork=()=>!stopped&&!paused&&!isHidden();
  function trimMemoryCache(){
@@ -131,6 +131,28 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
   })
  }
  async function checkStorage(){if(Date.now()-storageCheckAt<300000||!navigator.storage?.estimate)return;storageCheckAt=Date.now();try{const e=await navigator.storage.estimate(),usage=Number(e.usage)||0,quota=Number(e.quota)||0,ratio=quota?usage/quota:0;if(ratio>=.8)onState({status:"cache-storage-pressure",usageBytes:usage,quotaBytes:quota,usageRatio:ratio,level:ratio>=.9?"critical":"warning"})}catch(_){}}
+ async function persistRepairTask(key,error,attempt){
+  const db=await getDB();if(!db)return false;
+  return new Promise((resolve,reject)=>{
+   let tx;try{tx=db.transaction([META_STORE],"readwrite")}catch(e){reject(e);return}
+   tx.objectStore(META_STORE).put({id:"repairTask|"+key,key,status:"pending",error:String(error||""),attempt,nextRetryAt:Date.now()+Math.min(300000,30000*2**Math.min(attempt,4)),updatedAt:Date.now()});
+   tx.oncomplete=()=>resolve(true);tx.onerror=tx.onabort=()=>reject(tx.error||new Error("Repair task persistence failed"));
+  });
+ }
+ async function clearRepairTask(key){
+  const db=await getDB();if(!db)return false;
+  return new Promise((resolve,reject)=>{
+   let tx;try{tx=db.transaction([META_STORE],"readwrite")}catch(e){reject(e);return}
+   tx.objectStore(META_STORE).delete("repairTask|"+key);
+   tx.oncomplete=()=>resolve(true);tx.onerror=tx.onabort=()=>reject(tx.error||new Error("Repair task cleanup failed"));
+  });
+ }
+ function scheduleHistoryRetry(){
+  if(historyRetryTimer||stopped||!failed.size)return;
+  const attempt=Math.max(0,...retryAttempts.values());
+  const delay=Math.min(300000,30000*2**Math.min(attempt,4));
+  historyRetryTimer=setTimeout(()=>{historyRetryTimer=0;startHistoryQueue(true)},delay);
+ }
  async function write(key,rows,done,status="ok",error=null){
   const db=await getDB();if(!db){putMemory(key,memoryCache.get(key)||{},rows,done,status,error);return}
   await new Promise((resolve,reject)=>{let tx;try{tx=db.transaction([LEGACY_STORE,STORE,META_STORE],"readwrite")}catch(e){reject(e);return}
@@ -204,9 +226,14 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
   if(isActive(c,tf)){candles=rows;complete=done;render(rows,selection,tf)}
   if(done){await ensureEmaSeries(key,rows,await getDB());completed.add(key);failed.delete(key);return}
   while(canWork()&&rows.length){
-   const page=await older(c,tf,rows[0].t);
+   let page=await older(c,tf,rows[0].t);
    if(!canWork()){await write(key,rows,false,"paused");return}
-   if(!page.length){done=true;await write(key,rows,true,"history-boundary-reached");break}
+   if(!page.length){
+    // Confirm an empty historical page independently before declaring the exchange history boundary.
+    page=await older(c,tf,rows[0].t);
+    if(!canWork()){await write(key,rows,false,"paused");return}
+    if(!page.length){done=true;await write(key,rows,true,"history-boundary-reached");break}
+   }
    const old=rows[0].t,next=page[0].t;
    if(next>=old)throw new Error("Gate history pagination did not move backward");
    rows=merge(rows,page);await write(key,rows,false);
@@ -232,11 +259,22 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
      const key=keyOf(item.gateContract||item.contract,tf);
      if(completed.has(key)&&!forceLatestSweep)continue;
      const c=item.gateContract||item.contract;
-     try{await backfillPeriod(c,tf);if(completed.has(key))failed.delete(key)}
-     catch(error){
+     try{
+      await backfillPeriod(c,tf);
+      if(completed.has(key)){
+       failed.delete(key);retryAttempts.delete(key);
+       try{await clearRepairTask(key)}catch(error){onState({status:"repair-task-cleanup-failed",key,error:String(error?.message||error)})}
+      }
+     }catch(error){
       if(!canWork())break;
-      const message=String(error?.message||error);failed.set(key,message);
-      try{const snapshot=await read(key);await write(key,snapshot.candles,false,"failed",message);await ensureEmaSeries(key,snapshot.candles,await getDB())}catch(_){}
+      const message=String(error?.message||error),attempt=(retryAttempts.get(key)||0)+1;
+      retryAttempts.set(key,attempt);failed.set(key,message);
+      try{
+       const snapshot=await read(key);
+       await write(key,snapshot.candles,false,"failed",message);
+       await ensureEmaSeries(key,snapshot.candles,await getDB());
+       await persistRepairTask(key,message,attempt);
+      }catch(persistError){onState({status:"repair-task-persist-failed",key,error:String(persistError?.message||persistError)})}
       if(isActive(c,tf))onState({symbol:item.symbol,contract:c,timeframe:tf,status:"request-failed",error:message});
      }
      if(canWork())await new Promise(resolve=>setTimeout(resolve,60));
@@ -246,10 +284,14 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
   }finally{
    queueRunning=false;
    if(queueRestartRequested&&canWork()){queueRestartRequested=false;void runHistoryQueue()}
-   else if(canWork())forceLatestSweep=false;
+   else if(canWork()){
+    forceLatestSweep=false;
+    if(failed.size)scheduleHistoryRetry();
+    else if(historyRetryTimer){clearTimeout(historyRetryTimer);historyRetryTimer=0}
+   }
   }
  }
- function startHistoryQueue(forceLatest=false){if(stopped||paused||isHidden())return;if(forceLatest)forceLatestSweep=true;if(queueRunning){if(forceLatest)queueRestartRequested=true;return;}void runHistoryQueue()}
+ function startHistoryQueue(forceLatest=false){if(stopped||paused||isHidden())return;if(forceLatest){forceLatestSweep=true;if(historyRetryTimer){clearTimeout(historyRetryTimer);historyRetryTimer=0}}if(queueRunning){if(forceLatest)queueRestartRequested=true;return;}void runHistoryQueue()}
  async function updateLatest(c,tf,token,force=false){
   const key=keyOf(c,tf),last=latestCheckedAt.get(key)||0;
   if(!force&&Date.now()-last<60000)return true;
@@ -304,8 +346,8 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
   }catch(e){if(current(token))onState({symbol,contract,timeframe,count:candles.length,historyComplete:complete,status:"cache-read-failed",error:String(e?.message||e)});return false}
  }
  async function refresh(){if(stopped||!contract||!canWork())return false;return updateLatest(contract,timeframe,selection,true)}
- function suspend(){paused=true;for(const controller of requestControllers)controller.abort("page-hidden");closeWS();void flushPendingWrites()}
+ function suspend(){paused=true;if(historyRetryTimer){clearTimeout(historyRetryTimer);historyRetryTimer=0}for(const controller of requestControllers)controller.abort("page-hidden");closeWS();void flushPendingWrites()}
  function resume(){if(stopped||isHidden())return;paused=false;forceLatestSweep=true;if(contract)void select(symbol,contract,timeframe,true);else startHistoryQueue(true)}
- function destroy(){if(stopped)return;stopped=true;paused=true;selection++;for(const controller of requestControllers)controller.abort("controller-destroyed");closeWS();void flushPendingWrites()}
+ function destroy(){if(stopped)return;stopped=true;paused=true;if(historyRetryTimer){clearTimeout(historyRetryTimer);historyRetryTimer=0}selection++;for(const controller of requestControllers)controller.abort("controller-destroyed");closeWS();void flushPendingWrites()}
  return Object.freeze({select,refresh,resume,suspend,destroy,getContracts,get state(){return Object.freeze({symbol,contract,timeframe,count:candles.length,historyComplete:complete,historyQueue:Object.freeze({running:queueRunning,completed:completed.size,total:instruments.length*TIMEFRAMES.length,failed:Object.fromEntries(failed)})})}});
 }
