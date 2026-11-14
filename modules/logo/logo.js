@@ -13,13 +13,20 @@ function apply(symbol){
  image.alt=symbol;image.hidden=false;label.textContent=symbol;current=symbol;renderCountdown();
 }
 function setSymbol(symbol){
- if(typeof symbol!=="string"||!symbol||symbol===current||transitioning)return;
+ if(typeof symbol!=="string"||!symbol)return;
+ if(transitioning){pending=symbol===current?null:symbol;return;}
+ if(symbol===current)return;
  if(!current){apply(symbol);brand.style.opacity="1";return;}
  pending=symbol;transitioning=true;brand.style.opacity="0";
  window.setTimeout(()=>{
-  if(pending)apply(pending);
-  pending=null;brand.style.opacity="1";
-  window.setTimeout(()=>{transitioning=false;},1500);
+  const next=pending;pending=null;
+  if(next)apply(next);
+  brand.style.opacity="1";
+  window.setTimeout(()=>{
+   transitioning=false;
+   const queued=pending;pending=null;
+   if(queued&&queued!==current)setSymbol(queued);
+  },1500);
  },1500);
 }
 function renderCountdown(){

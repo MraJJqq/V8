@@ -15,7 +15,7 @@ const app=document.getElementById("app"),rollingFrame=document.getElementById("r
 const logoFrame=document.getElementById("logo-frame"),timeframeFrame=document.getElementById("timeframe-frame");
 const klineHost=document.getElementById("kline-host"),STORAGE="vegas-v6-selected-timeframe",RANDOM_START="vegas-v6-last-random-start";
 let timeframe="4H",destroyed=false,logoIndex=0,rotationTimer=null,transitionTimer=null,interactionResumeTimer=null,userRotationPaused=false;
-let timeframeSwitchToken=0,pendingTimeframe=null;
+let transitionActive=false,activeTarget=null,queuedTarget=null;
 let signalBusy=false,quoteBusy=false,foregroundInterval=null,quoteAbort=null;
 const interactionLocks=new Set();
 try{const saved=localStorage.getItem(STORAGE);if(["1H","2H","4H","8H","D"].includes(saved))timeframe=saved}catch(_){}
@@ -28,13 +28,15 @@ try{localStorage.setItem(RANDOM_START,sessionQueue[0].symbol)}catch(_){}
 if(INSTRUMENTS.length!==27||Object.keys(GATE_CONTRACTS).length!==INSTRUMENTS.length)throw new Error("V6 instrument universe mismatch");
 const GATE_INSTRUMENTS=INSTRUMENTS.map(item=>Object.freeze({...item,gateContract:GATE_CONTRACTS[item.symbol]}));
 if(GATE_INSTRUMENTS.some(item=>!item.gateContract))throw new Error("V6 Gate contract mapping incomplete");
-function sendLogoState(){const item=sessionQueue[logoIndex];if(!item||!logoFrame?.contentWindow)return;logoFrame.contentWindow.postMessage({type:"VEGAS_LOGO_SET_SYMBOL",symbol:item.symbol},location.origin);logoFrame.contentWindow.postMessage({type:"VEGAS_LOGO_SET_TIMEFRAME",timeframe},location.origin);}
-function sendTimeframeState(){timeframeFrame?.contentWindow?.postMessage({type:"VEGAS_TIMEFRAME_SET",timeframe},location.origin);}
+function sendLogoSymbol(index=logoIndex){const item=sessionQueue[index];if(item&&logoFrame?.contentWindow)logoFrame.contentWindow.postMessage({type:"VEGAS_LOGO_SET_SYMBOL",symbol:item.symbol},location.origin);}
+function sendLogoTimeframe(value=timeframe){if(logoFrame?.contentWindow)logoFrame.contentWindow.postMessage({type:"VEGAS_LOGO_SET_TIMEFRAME",timeframe:value},location.origin);}
+function sendLogoState(index=logoIndex,value=timeframe){sendLogoSymbol(index);sendLogoTimeframe(value);}
+function sendTimeframeState(value=timeframe){timeframeFrame?.contentWindow?.postMessage({type:"VEGAS_TIMEFRAME_SET",timeframe:value},location.origin);}
 function setInteractionLock(source,active){
  if(destroyed)return;
  if(active){interactionLocks.add(source);if(interactionResumeTimer!==null){clearTimeout(interactionResumeTimer);interactionResumeTimer=null;}if(rotationTimer!==null){clearTimeout(rotationTimer);rotationTimer=null;}return;}
  interactionLocks.delete(source);
- if(interactionLocks.size||interactionResumeTimer!==null||transitionTimer!==null)return;
+ if(interactionLocks.size||interactionResumeTimer!==null||transitionActive)return;
  interactionResumeTimer=setTimeout(()=>{interactionResumeTimer=null;if(!destroyed&&!isRuntimeHidden()&&!interactionLocks.size&&!userRotationPaused)scheduleSymbolRotation();},0);
 }
 const view=createV6KlineView({host:klineHost,onInteractionChange:setInteractionLock});
@@ -46,7 +48,7 @@ function setUserRotationPaused(paused){
   if(interactionResumeTimer!==null){clearTimeout(interactionResumeTimer);interactionResumeTimer=null;}
   return;
  }
- if(!destroyed&&!isRuntimeHidden()&&!interactionLocks.size&&transitionTimer===null)scheduleSymbolRotation();
+ if(!destroyed&&!isRuntimeHidden()&&!interactionLocks.size&&!transitionActive)scheduleSymbolRotation();
 }
 const rotationPause=createKlineRotationPause({target:klineHost,onToggle:()=>setUserRotationPaused(!userRotationPaused)});
 const controller=createGateKlineController({frame:{contentWindow:view},instruments:GATE_INSTRUMENTS,isHidden:isRuntimeHidden,onState:s=>{if(s.status==="request-failed"||s.status==="cache-unavailable"||s.status==="cache-write-failed")console.warn("[VEGAS V6 data]",s);}});
@@ -54,43 +56,65 @@ lifecycle.listen(window,"unhandledrejection",event=>console.error("[VEGAS V6 unh
 lifecycle.listen(window,"error",event=>console.error("[VEGAS V6 runtime error]",event.message,event.filename,event.lineno));
 const feed=createV12Feed({isHidden:isRuntimeHidden}),ticker=createSignalTicker();
 function selectSymbol(symbol){const item=INSTRUMENTS.find(x=>x.symbol===symbol),contract=GATE_CONTRACTS[symbol];if(!item||!contract){console.warn("[VEGAS V6] Unknown symbol:",symbol);return false;}void controller.select(symbol,contract,timeframe);return true;}
-function switchTimeframe(next){
- if(!["1H","2H","4H","8H","D"].includes(next))return;
- if(next===timeframe&&pendingTimeframe===null)return;
- const token=++timeframeSwitchToken;
- pendingTimeframe=next;
- clearRotationTimers();
+function clearRotationTimers(){if(rotationTimer!==null){clearTimeout(rotationTimer);rotationTimer=null;}if(transitionTimer!==null){clearTimeout(transitionTimer);transitionTimer=null;}}
+function desiredTarget(){return queuedTarget||activeTarget||{symbolIndex:logoIndex,timeframe};}
+function beginTransition(target){
+ if(destroyed||isRuntimeHidden())return;
+ const next={symbolIndex:target.symbolIndex,timeframe:target.timeframe};
+ if(next.symbolIndex===logoIndex&&next.timeframe===timeframe){scheduleSymbolRotation();return;}
+ transitionActive=true;activeTarget=next;
+ if(rotationTimer!==null){clearTimeout(rotationTimer);rotationTimer=null;}
+ const symbolChanged=next.symbolIndex!==logoIndex,timeframeChanged=next.timeframe!==timeframe;
  app.classList.add("is-symbol-transitioning");
- transitionTimer=setTimeout(async()=>{
+ if(symbolChanged)sendLogoSymbol(next.symbolIndex);
+ transitionTimer=setTimeout(()=>{
   transitionTimer=null;
-  if(destroyed||isRuntimeHidden()||token!==timeframeSwitchToken)return;
-  const changed=next!==timeframe;
-  timeframe=next;
-  pendingTimeframe=null;
-  if(changed){
-   try{localStorage.setItem(STORAGE,next)}catch(_){}
-   sendTimeframeState();sendLogoState();
-   if(controller.state.contract)await controller.select(controller.state.symbol,controller.state.contract,timeframe);
+  if(destroyed||isRuntimeHidden()){transitionActive=false;activeTarget=null;return;}
+  logoIndex=next.symbolIndex;
+  if(timeframeChanged){
+   timeframe=next.timeframe;
+   try{localStorage.setItem(STORAGE,timeframe)}catch(_){}
+   if(!queuedTarget||queuedTarget.timeframe===timeframe)sendTimeframeState(timeframe);
+   sendLogoTimeframe(timeframe);
   }
-  if(destroyed||isRuntimeHidden()||token!==timeframeSwitchToken)return;
+  if(symbolChanged||timeframeChanged){
+   const item=sessionQueue[logoIndex];
+   if(item)void controller.select(item.symbol,GATE_CONTRACTS[item.symbol],timeframe);
+  }
   app.classList.remove("is-symbol-transitioning");
   transitionTimer=setTimeout(()=>{
-   transitionTimer=null;
-   if(!destroyed&&!isRuntimeHidden()&&token===timeframeSwitchToken)scheduleSymbolRotation();
+   transitionTimer=null;transitionActive=false;activeTarget=null;
+   const queued=queuedTarget;queuedTarget=null;
+   if(queued&&(queued.symbolIndex!==logoIndex||queued.timeframe!==timeframe))beginTransition(queued);
+   else if(!interactionLocks.size&&!userRotationPaused)scheduleSymbolRotation();
   },1500);
  },1500);
 }
-function clearRotationTimers(){if(rotationTimer!==null){clearTimeout(rotationTimer);rotationTimer=null;}if(transitionTimer!==null){clearTimeout(transitionTimer);transitionTimer=null;}}
-function scheduleSymbolRotation(){if(destroyed||isRuntimeHidden()||interactionLocks.size||userRotationPaused)return;clearRotationTimers();rotationTimer=setTimeout(()=>transitionToIndex((logoIndex+1)%sessionQueue.length),7000);}
+function requestTransition(patch){
+ if(destroyed||isRuntimeHidden()||!sessionQueue.length)return;
+ const base=desiredTarget(),next={...base,...patch};
+ if(transitionActive){queuedTarget=next;return;}
+ if(next.symbolIndex===logoIndex&&next.timeframe===timeframe)return;
+ beginTransition(next);
+}
+function switchTimeframe(next){
+ if(!["1H","2H","4H","8H","D"].includes(next))return;
+ if(next===desiredTarget().timeframe)return;
+ requestTransition({timeframe:next});
+}
+function scheduleSymbolRotation(){
+ if(destroyed||isRuntimeHidden()||interactionLocks.size||userRotationPaused||transitionActive)return;
+ if(rotationTimer!==null)clearTimeout(rotationTimer);
+ rotationTimer=setTimeout(()=>{rotationTimer=null;requestTransition({symbolIndex:(logoIndex+1)%sessionQueue.length});},7000);
+}
 function transitionToIndex(index){
  if(destroyed||isRuntimeHidden()||interactionLocks.size||!sessionQueue.length)return;
- timeframeSwitchToken++;pendingTimeframe=null;
- clearRotationTimers();logoIndex=((index%sessionQueue.length)+sessionQueue.length)%sessionQueue.length;
- app.classList.add("is-symbol-transitioning");sendLogoState();
- transitionTimer=setTimeout(()=>{if(destroyed||isRuntimeHidden())return;selectSymbol(sessionQueue[logoIndex].symbol);app.classList.remove("is-symbol-transitioning");transitionTimer=setTimeout(()=>{transitionTimer=null;scheduleSymbolRotation();},1500);},1500);
+ const normalized=((index%sessionQueue.length)+sessionQueue.length)%sessionQueue.length;
+ if(normalized===desiredTarget().symbolIndex)return;
+ requestTransition({symbolIndex:normalized});
 }
 function startSymbolRotation(){if(destroyed||isRuntimeHidden())return;sendLogoState();scheduleSymbolRotation();}
-function stopSymbolRotation(){timeframeSwitchToken++;pendingTimeframe=null;clearRotationTimers();app.classList.remove("is-symbol-transitioning");}
+function stopSymbolRotation(){clearRotationTimers();transitionActive=false;activeTarget=null;queuedTarget=null;app.classList.remove("is-symbol-transitioning");}
 async function refreshSignals(){
  if(destroyed||isRuntimeHidden()||signalBusy)return;signalBusy=true;
  try{const payload=await feed.read();if(!destroyed&&!isRuntimeHidden())ticker.render(payload);}
@@ -129,7 +153,7 @@ pageLifecycle=createPageLifecycle({documentRef:document,windowRef:window,onSuspe
 document.documentElement.classList.toggle("vegas-page-hidden",isRuntimeHidden());
 lifecycle.listen(window,"beforeunload",teardown,{once:true});
 ticker.render(null);
-lifecycle.listen(logoFrame,"load",()=>{if(!isRuntimeHidden())sendLogoState();});
+lifecycle.listen(logoFrame,"load",()=>{if(!isRuntimeHidden()){if(transitionActive&&activeTarget)sendLogoState(activeTarget.symbolIndex,timeframe);else sendLogoState();}});
 lifecycle.listen(timeframeFrame,"load",sendTimeframeState);
 lifecycle.listen(window,"message",event=>{
  if(event.origin!==location.origin)return;
