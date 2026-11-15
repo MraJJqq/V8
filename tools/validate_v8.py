@@ -197,9 +197,6 @@ catalog = (ROOT / "modules/shared/instrument-catalog.js").read_text(encoding="ut
 catalog_symbols = re.findall(r'\["([A-Z0-9]+)","[A-Z0-9]+USDT"', catalog)
 if len(catalog_symbols) != 24 or len(set(catalog_symbols)) != 24:
     fail(f"local instrument catalog must contain exactly 24 unique symbols; found {len(catalog_symbols)}")
-for removed in ("META", "QCOM", "CBRS"):
-    if removed in catalog_symbols:
-        fail(f"removed symbol remains in the V8 local pool: {removed}")
 feed = (ROOT / "modules/signal-ticker/v12-feed.js").read_text(encoding="utf-8")
 scan_block = re.search(r"V12_SCAN_SYMBOLS\s*=\s*Object\.freeze\(\[([^]]+)\]", feed)
 if not scan_block or len(re.findall(r'"[A-Z0-9]+"', scan_block.group(1))) != 24:

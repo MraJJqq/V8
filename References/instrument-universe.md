@@ -1,6 +1,6 @@
 # V6 品种与交易所映射
 
-唯一品种清单来源：`V6/modules/shared/universe-v6.js`。Gate 永续合约映射来源：`V6/modules/shared/gate-universe.js`。共 24 个品种（V8 本地资金池）。V12 扫描池仍为 27 个，V8 仅展示本地24个品种。
+唯一品种清单来源：`V6/modules/shared/universe-v6.js`。Gate 永续合约映射来源：`V6/modules/shared/gate-universe.js`。共 24 个品种（V8 本地资金池）。V12 扫描池与 V8 本地资金池统一为 24 个品种。
 
 V12 公共信号使用逻辑合约代码（例如 `AAPLUSDT`）；V6 的 K 线和卡片行情使用 Gate USDT 永续合约代码（例如 `AAPL_USDT`）。两种代码用途不同，不得互换。
 
