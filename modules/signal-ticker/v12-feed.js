@@ -23,7 +23,7 @@ export function validateV12Payload(payload, nowMs = Date.now()) {
     throw new Error("V12 full-pool scan is not complete");
   }
 
-  // Require the exact V12/V4 contract universe, not merely a matching 27/27 counter.
+  // Require the exact complete V12 scan universe, not merely a matching 27/27 counter.
   // Contract suffixes provide the canonical feed names (SKHY, not SKHYNIX).
   const expectedSymbols = new Set(
     V12_SCAN_SYMBOLS
