@@ -1,14 +1,15 @@
 # VEGAS V6
 
 ## Runtime
-- The 27-symbol catalog, Gate contract derivation, and logo asset mapping are maintained in one local catalog shared by the card and logo modules.
+- V8 local pool: 24 instruments. V12 continues scanning its independent complete 27-symbol universe; V8 validates the full feed and displays only its 24 local instruments.
+- The 24-symbol catalog, Gate contract derivation, and logo asset mapping are maintained in one local catalog shared by the card and logo modules.
 - Internal ES-module imports use canonical URLs so one shared module is not instantiated again under a different query string.
 - 页面编排采用统一的模块生命周期、轮播、淡入淡出、交互锁与前后台暂停管理；仅适配 Gate 数据源。
 - Logo、周期选择、滚动卡片、V12 信号栏及共享生命周期模块均为 V6 仓库内的本地文件。
 - K 线数据只使用 Gate USDT 永续合约；不加载其他交易所客户端或行情存储。
 
 ## K-line and cache
-- 统一周期标准：1H、2H、4H、8H、D。27 个品种均按这五个周期读取、缓存和续传全部可取得历史数据。
+- 统一周期标准：1H、2H、4H、8H、D。24 个品种均按这五个周期读取、缓存和续传全部可取得历史数据。
 - 2H 由 Gate 原始 1H K 线按 UTC 两小时边界聚合；开高低收分别取首根开盘、两根最高、两根最低、末根收盘。历史闭合 2H 必须由两根连续 1H 组成，当前未闭合周期可显示实时部分数据。EMA 使用统一 K 线计算流程。
 - 历史补齐由独立队列逐项执行，与当前选中品种、7 秒轮播、图表重绘和手势生命周期解耦。
 - IndexedDB 缓存键按 Gate 数据源、合约、周期隔离；历史补齐与轮播/图表交互分离。
@@ -20,7 +21,7 @@
 - The current viewport is saved on page hide/reload and restored on reload. Cards only rotate/select symbols and do not own a separate K-line zoom state.
 
 ## Rotation and interactions
-- 刷新后随机排列 27 个品种，并避免与上次刷新首个品种重复。
+- 刷新后随机排列 24 个品种，并避免与上次刷新首个品种重复。
 - K 线/Logo 按 V5 编排层节奏轮播；K 线手势或卡片拖动期间暂停轮播。
 - 卡片点选切换当前品种；周期模块将选择同步给 K 线和 Logo 倒计时。
 - 卡片行情来自 Gate futures tickers；V12 信号栏读取 V12 公共信号文件。
