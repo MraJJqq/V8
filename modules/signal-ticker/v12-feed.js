@@ -36,7 +36,7 @@ export function validateV12Payload(payload, nowMs = Date.now()) {
     seenSymbols.add(symbol);
   }
   if (seenSymbols.size !== expected || [...expectedSymbols].some(symbol => !seenSymbols.has(symbol))) {
-    throw new Error("V12 symbols does not contain all 27 V4 instruments");
+    throw new Error("V12 symbols does not contain all 27 V12 scan symbols");
   }
   return payload;
 }
