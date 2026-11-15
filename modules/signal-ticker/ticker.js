@@ -70,8 +70,8 @@ export function createSignalTicker({
     if (payload) {
       const valid = payload.source === "VEGAS V12" &&
         (payload.scan_status === "complete" || payload.scan_status === "complete_with_warmup_warning") &&
-        payload.symbols_ok === 27 &&
-        payload.symbols_total === 27 &&
+        payload.symbols_ok === 24 &&
+        payload.symbols_total === 24 &&
         Array.isArray(payload.signals);
 
       if (!valid) {
