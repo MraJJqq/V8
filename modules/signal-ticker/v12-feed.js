@@ -1,5 +1,4 @@
 import { V6_CONFIG } from "../shared/config.js";
-import { INSTRUMENTS as V6_INSTRUMENTS } from "../shared/universe-v6.js";
 
 const DEFAULT_URL = "https://raw.githubusercontent.com/MraJJqq/v12/main/v12/public-signals.json";
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -18,17 +17,18 @@ export function validateV12Payload(payload, nowMs = Date.now()) {
     throw new Error("V12 feed is not current Beijing day");
   }
 
-  const expected = V6_CONFIG.app.instrumentCount;
+  const expected = V6_CONFIG.app.signalScanCount;
   if ((payload.scan_status !== "complete" && payload.scan_status !== "complete_with_warmup_warning") ||
       payload.symbols_ok !== expected || payload.symbols_total !== expected) {
     throw new Error("V12 full-pool scan is not complete");
   }
 
-  // Require the exact V12/V4 contract universe, not merely a matching 27/27 counter.
-  // Contract suffixes provide the canonical feed names (SKHY, not SKHYNIX).
-  const expectedSymbols = new Set(
-    V6_INSTRUMENTS.map(item => item.contract.replace(/USDT$/, ""))
-  );
+  // V12 retains its independent 27-symbol scan universe; V8 displays only 24.
+  const expectedSymbols = new Set([
+    "AAPL","MSFT","GOOGL","AMZN","NVDA","TSLA","META","INTC","QCOM",
+    "AMD","TSM","AVGO","ORCL","ARM","MU","ASML","SNDK","SKHY",
+    "MRVL","GLW","HOOD","CBRS","SPCX","BTC","HYPE","XAU","CL"
+  ]);
   const seenSymbols = new Set();
   for (const symbol of payload.symbols) {
     if (typeof symbol !== "string" || !expectedSymbols.has(symbol) || seenSymbols.has(symbol)) {
@@ -37,7 +37,7 @@ export function validateV12Payload(payload, nowMs = Date.now()) {
     seenSymbols.add(symbol);
   }
   if (seenSymbols.size !== expected || [...expectedSymbols].some(symbol => !seenSymbols.has(symbol))) {
-    throw new Error("V12 symbols does not contain all 27 V4 instruments");
+    throw new Error("V12 symbols does not contain the complete 27-symbol V12 source universe");
   }
   return payload;
 }

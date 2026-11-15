@@ -1,5 +1,7 @@
 import { INSTRUMENTS } from "../shared/universe-v6.js";
 
+const V12_SCAN_COUNT = 27;
+
 export function createSignalTicker({
   container,
   track,
@@ -70,8 +72,8 @@ export function createSignalTicker({
     if (payload) {
       const valid = payload.source === "VEGAS V12" &&
         (payload.scan_status === "complete" || payload.scan_status === "complete_with_warmup_warning") &&
-        payload.symbols_ok === instruments.length &&
-        payload.symbols_total === instruments.length &&
+        payload.symbols_ok === V12_SCAN_COUNT &&
+        payload.symbols_total === V12_SCAN_COUNT &&
         Array.isArray(payload.signals);
 
       if (!valid) {
