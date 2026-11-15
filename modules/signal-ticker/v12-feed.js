@@ -1,4 +1,3 @@
-import { V6_CONFIG } from "../shared/config.js";
 
 const DEFAULT_URL = "https://raw.githubusercontent.com/MraJJqq/v12/main/v12/public-signals.json";
 const V12_SCAN_SYMBOLS = Object.freeze(["AAPL","MSFT","GOOGL","AMZN","NVDA","TSLA","META","INTC","QCOM","AMD","TSM","AVGO","ORCL","ARM","MU","ASML","SNDK","SKHY","MRVL","GLW","HOOD","CBRS","SPCX","BTC","HYPE","XAU","CL"]);
@@ -32,7 +31,7 @@ export function validateV12Payload(payload, nowMs = Date.now()) {
   const seenSymbols = new Set();
   for (const symbol of payload.symbols) {
     if (typeof symbol !== "string" || !expectedSymbols.has(symbol) || seenSymbols.has(symbol)) {
-      throw new Error("V12 symbols does not match the complete V4 instrument universe");
+      throw new Error("V12 symbols does not match the complete V12 instrument universe");
     }
     seenSymbols.add(symbol);
   }
