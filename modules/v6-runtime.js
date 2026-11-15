@@ -4,9 +4,9 @@ import { INSTRUMENTS, createSessionQueue } from "./shared/universe-v6.js";
 import { createV12Feed } from "./signal-ticker/v12-feed.js";
 import { createSignalTicker } from "./signal-ticker/ticker.js";
 import { GATE_CONTRACTS } from "./shared/universe-v6.js";
-import { createV6KlineView } from "../kline/v6-kline-view.js?v=v6-kline-pause-20261113-1";
-import { createGateKlineController } from "../kline/gate-kline-controller.js?v=v6-kline-pause-20261113-1";
-import { createKlineRotationPause } from "./kline-rotation-pause.js?v=v6-kline-pause-20261113-1";
+import { createV6KlineView } from "../kline/v6-kline-view.js?v=v6-kline-pause-20261115-1";
+import { createGateKlineController } from "../kline/gate-kline-controller.js?v=v6-kline-pause-20261115-1";
+import { createKlineRotationPause } from "./kline-rotation-pause.js?v=v6-kline-pause-20261115-1";
 
 const lifecycle=createLifecycleScope();
 let pageLifecycle=null;

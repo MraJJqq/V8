@@ -143,7 +143,7 @@ if "discardedLegacyArray" not in controller:
 
 # All static CSS/JS entry resources use one cache-busting release token.
 STATIC_ASSET_VERSION = "v6-static-20261112-3"
-KLINE_SYNC_VERSION = "v6-kline-pause-20261113-1"
+KLINE_SYNC_VERSION = "v6-kline-pause-20261115-1"
 static_versions = set()
 for page in html_files:
     source = page.read_text(encoding="utf-8")
