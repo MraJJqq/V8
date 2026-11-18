@@ -3,31 +3,27 @@ export function createKlineRotationPause({target,onToggle}) {
  if(typeof onToggle!=="function")throw new TypeError("K-line pause callback is required");
  const abort=new AbortController(),{signal}=abort;
  const active=new Map();
- let lastTapAt=0,lastTapType="",destroyed=false;
- function invalidateGesture(){for(const state of active.values())state.moved=true;lastTapAt=0;lastTapType="";}
+ let lastTapAt=0,destroyed=false;
+ function invalidateGesture(){for(const state of active.values())state.moved=true;lastTapAt=0;}
  function down(event){
   if(destroyed||(event.button!==undefined&&event.button!==0))return;
-  const pointerType=event.pointerType||"mouse";
-  active.set(event.pointerId,{x:event.clientX,y:event.clientY,pointerType,moved:false});
+  const state={x:event.clientX,y:event.clientY,moved:false};
+  active.set(event.pointerId,state);
   if(active.size>1)invalidateGesture();
  }
  function move(event){
   const state=active.get(event.pointerId);if(!state)return;
-  const threshold=state.pointerType==="touch"?8:4;
-  if(Math.hypot(event.clientX-state.x,event.clientY-state.y)>threshold)state.moved=true;
+  if(Math.hypot(event.clientX-state.x,event.clientY-state.y)>4)state.moved=true;
  }
  function finish(event){
   const state=active.get(event.pointerId);if(!state)return;
-  const threshold=state.pointerType==="touch"?8:4;
-  if(Math.hypot(event.clientX-state.x,event.clientY-state.y)>threshold)state.moved=true;
+  if(Math.hypot(event.clientX-state.x,event.clientY-state.y)>4)state.moved=true;
   active.delete(event.pointerId);
   if(active.size){invalidateGesture();return;}
-  if(state.moved){lastTapAt=0;lastTapType="";return;}
+  if(state.moved){lastTapAt=0;return;}
   const now=Number(event.timeStamp)||performance.now();
-  const windowMs=state.pointerType==="touch"?420:320;
-  if(lastTapAt>0&&lastTapType===state.pointerType&&now>=lastTapAt&&now-lastTapAt<=windowMs){
-   lastTapAt=0;lastTapType="";onToggle();
-  }else{lastTapAt=now;lastTapType=state.pointerType;}
+  if(lastTapAt>0&&now>=lastTapAt&&now-lastTapAt<=320){lastTapAt=0;onToggle();}
+  else lastTapAt=now;
  }
  function cancel(event){
   if(!active.has(event.pointerId))return;
@@ -39,6 +35,6 @@ export function createKlineRotationPause({target,onToggle}) {
  target.addEventListener("pointerup",finish,{capture:true,signal});
  target.addEventListener("pointercancel",cancel,{capture:true,signal});
  target.addEventListener("lostpointercapture",cancel,{capture:true,signal});
- function destroy(){if(destroyed)return;destroyed=true;active.clear();lastTapAt=0;lastTapType="";abort.abort();}
+ function destroy(){if(destroyed)return;destroyed=true;active.clear();lastTapAt=0;abort.abort();}
  return Object.freeze({destroy});
 }
