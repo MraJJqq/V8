@@ -1,5 +1,4 @@
 :root{--tx:#f2f5ff;color-scheme:dark}
-html,body{background:transparent!important}
 /* 底部约 20% 高度的悬浮条；无背景 */
 #ring{
   touch-action:none;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none;
