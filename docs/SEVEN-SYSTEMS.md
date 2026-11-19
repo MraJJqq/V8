@@ -20,10 +20,10 @@ Background artwork is maintained in `../Backgrounds/`; the background-generation
 
 Entry: `index.html` → `modules/v6-runtime.js`.
 
-1. Load the shared lifecycle manager, page lifecycle manager, 24-instrument universe, Gate contract map, V12 feed, signal ticker, K-line view and Gate K-line controller.
+1. Load the shared lifecycle manager, page lifecycle manager, 22-instrument universe, Gate contract map, V12 feed, signal ticker, K-line view and Gate K-line controller.
 2. Restore the selected timeframe from local storage key `vegas-v6-selected-timeframe`; accepted values are `1H`, `2H`, `4H`, `8H`, and `D`. Default is `4H`.
-3. Build the 24-item session rotation queue. The first symbol is selected so it differs from the previous session's first symbol when possible; the previous start is stored as `vegas-v6-last-random-start`.
-4. Verify that the instrument universe and Gate contract map both contain exactly 24 complete entries.
+3. Build the 22-item session rotation queue. The first symbol is selected so it differs from the previous session's first symbol when possible; the previous start is stored as `vegas-v6-last-random-start`.
+4. Verify that the instrument universe and Gate contract map both contain exactly 22 complete entries.
 5. Initialize the K-line view/controller, V12 feed and ticker. The host page sends state to the Logo and timeframe iframe modules using same-origin `postMessage`.
 6. Rotate symbols through the session queue. The runtime uses a 7-second display interval and a 1.5-second transition stage; active user interaction locks pause rotation.
 7. Refresh V12 signals and Gate card quotes only while the page is active. Page lifecycle suspension prevents background work and resumes the runtime when visible again.
@@ -44,7 +44,7 @@ Sources:
 - `modules/v6-runtime.js`
 
 Responsibilities:
-- Maintain one 24-instrument universe and its Gate contract mapping.
+- Maintain one 22-instrument universe and its Gate contract mapping.
 - Coordinate page visibility, pagehide/pageshow and suspended/resumed work.
 - Own page-level timers and cleanups; prevent hidden-page polling and animation work.
 - Coordinate symbol selection, timeframe changes, K-line state and user-interaction locks.
@@ -75,7 +75,7 @@ Sources:
 
 Operating flow:
 1. The host sends `VEGAS_LOGO_SET_SYMBOL` and `VEGAS_LOGO_SET_TIMEFRAME` messages to the same-origin Logo iframe.
-2. The Logo module maps each of the 24 symbols to its local SVG asset.
+2. The Logo module maps each of the 22 symbols to its local SVG asset.
 3. Symbol changes use the module's fade transition; the previous image is faded before the new symbol is applied.
 4. Countdown uses the device clock and the selected timeframe duration. It updates at minute boundaries and pauses its clock scheduling while the document is hidden.
 5. Incoming messages are accepted only from the same-origin parent window.
@@ -131,7 +131,7 @@ Operating flow:
 
 ## Local assets and dependencies
 
-- Logos: `assets/logos/Core` and `assets/logos/Stocks` (24 SVG files).
+- Logos: `assets/logos/Core` and `assets/logos/Stocks` (22 active SVG files).
 - Font: `assets/fonts/ChakraPetch-Bold.ttf`.
 - App icons: `assets/icons/App-Icon.svg` and `assets/icons/App-Icon-180.png`.
 - Page-level and outer-container geometry: `assets/css/full-screen-dynamic.css` (single authority).
@@ -142,7 +142,7 @@ Operating flow:
 ## Validation checklist
 
 - Confirm all relative imports and runtime asset paths resolve within this V6 package; background artwork and its generator are maintained separately under `../Backgrounds/`.
-- Confirm all 24 symbols have a Gate contract mapping and local logo mapping.
+- Confirm all 22 symbols have a Gate contract mapping and local logo mapping.
 - Confirm all five intervals propagate from selector → host runtime → K-line controller → Logo countdown.
 - Confirm hidden-page suspension stops polling/animation work and visible-page restoration resumes it.
 - Confirm K-line history/cache/live update and viewport persistence.
