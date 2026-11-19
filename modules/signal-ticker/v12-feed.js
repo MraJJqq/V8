@@ -1,6 +1,6 @@
 
 const DEFAULT_URL = "https://raw.githubusercontent.com/MraJJqq/v12/main/v12/public-signals.json";
-const V12_SCAN_SYMBOLS = Object.freeze(["MSFT","GOOGL","AMZN","NVDA","INTC","AMD","TSM","AVGO","ORCL","ARM","MU","ASML","SNDK","SKHY","MRVL","GLW","HOOD","SPCX","BTC","HYPE","XAU","CL"]);
+const V12_SCAN_SYMBOLS = Object.freeze(["AAPL","MSFT","GOOGL","AMZN","NVDA","TSLA","INTC","AMD","TSM","AVGO","ORCL","ARM","MU","ASML","SNDK","SKHY","MRVL","GLW","HOOD","SPCX","BTC","HYPE","XAU","CL"]);
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_CACHE_MS = 30_000;
 
@@ -23,7 +23,7 @@ export function validateV12Payload(payload, nowMs = Date.now()) {
     throw new Error("V12 full-pool scan is not complete");
   }
 
-  // Require the exact complete V12 scan universe, not merely a matching 22/22 counter.
+  // Require the exact complete V12 scan universe, not merely a matching 24/24 counter.
   // Contract suffixes provide the canonical feed names (SKHY, not SKHYNIX).
   const expectedSymbols = new Set(
     V12_SCAN_SYMBOLS
@@ -36,7 +36,7 @@ export function validateV12Payload(payload, nowMs = Date.now()) {
     seenSymbols.add(symbol);
   }
   if (seenSymbols.size !== expected || [...expectedSymbols].some(symbol => !seenSymbols.has(symbol))) {
-    throw new Error("V12 symbols does not contain all 22 V12 scan symbols");
+    throw new Error("V12 symbols does not contain all 24 V12 scan symbols");
   }
   return payload;
 }
