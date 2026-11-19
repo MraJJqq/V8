@@ -118,7 +118,7 @@ function stopSymbolRotation(){clearRotationTimers();transitionActive=false;activ
 async function refreshSignals(){
  if(destroyed||isRuntimeHidden()||signalBusy)return;signalBusy=true;
  try{const payload=await feed.read();if(!destroyed&&!isRuntimeHidden())ticker.render(payload);}
- catch(error){if(isRuntimeHidden()||error.pageHidden||destroyed)return;if(/full-pool scan|current Beijing day/.test(String(error.message)))ticker.render({source:"VEGAS V12",scan_status:"running",symbols_ok:0,symbols_total:24,signals:[]});else{console.warn("[VEGAS V6 V12 feed]",error);ticker.render(null);}}
+ catch(error){if(isRuntimeHidden()||error.pageHidden||destroyed)return;if(/full-pool scan|current Beijing day/.test(String(error.message)))ticker.render({source:"VEGAS V12",scan_status:"running",symbols_ok:0,symbols_total:22,signals:[]});else{console.warn("[VEGAS V6 V12 feed]",error);ticker.render(null);}}
  finally{signalBusy=false;}
 }
 async function refreshCardQuotes(){
