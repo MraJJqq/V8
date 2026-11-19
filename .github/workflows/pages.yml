@@ -168,7 +168,7 @@ jobs:
           edit("tools/validate_v8.py", [
               ("len(catalog_symbols) != 24 or len(set(catalog_symbols)) != 24", "len(catalog_symbols) != 22 or len(set(catalog_symbols)) != 22"),
               ("exactly 24 unique symbols", "exactly 22 unique symbols"),
-              ("len(re.findall(r'\\\"[A-Z0-9]+\\\"', scan_block.group(1))) != 24", "len(re.findall(r'\\\"[A-Z0-9]+\\\"', scan_block.group(1))) != 22"),
+              ("len(re.findall(r'\"[A-Z0-9]+\"', scan_block.group(1))) != 24", "len(re.findall(r'\"[A-Z0-9]+\"', scan_block.group(1))) != 22"),
               ("complete 24-symbol scan universe", "complete 22-symbol scan universe"),
               ('INSTRUMENTS.length!==24', 'INSTRUMENTS.length!==22'),
               ("24-symbol V8 local pool", "22-symbol V8 local pool"),
