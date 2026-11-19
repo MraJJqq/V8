@@ -1,8 +1,8 @@
 # VEGAS V6
 
 ## Runtime
-- V8 local pool: 24 instruments. V12 continues scanning its independent complete 24-symbol universe; V8 validates the full feed and displays only its 24 local instruments.
-- The 24-symbol catalog, Gate contract derivation, and logo asset mapping are maintained in one local catalog shared by the card and logo modules.
+- V8 local pool: 22 instruments. V12 continues scanning its independent complete 22-symbol universe; V8 validates the full feed and displays only its 24 local instruments.
+- The 22-symbol catalog, Gate contract derivation, and logo asset mapping are maintained in one local catalog shared by the card and logo modules.
 - Internal ES-module imports use canonical URLs so one shared module is not instantiated again under a different query string.
 - 页面编排采用统一的模块生命周期、轮播、淡入淡出、交互锁与前后台暂停管理；仅适配 Gate 数据源。
 - Logo、周期选择、滚动卡片、V12 信号栏及共享生命周期模块均为 V6 仓库内的本地文件。
@@ -31,7 +31,7 @@
 - K线画布继续由 ResizeObserver 与 DPR 独立调整；K线数据、手势缩放和视窗状态逻辑不变。
 - 周期切换控件按可用高度适配；横屏使用独立尺寸规则。
 - 周期切换 iframe 只加载自身响应式样式，不再加载整份主页面全屏适配 CSS；主页面仍统一负责 iframe 的位置与尺寸。
-- 24 张卡片根据实际卡片视区调整尺寸，小屏减少同时可见数量，优先保持文字可读；卡片选择、拖动、轮播和报价逻辑不变。
+- 22 张卡片根据实际卡片视区调整尺寸，小屏减少同时可见数量，优先保持文字可读；卡片选择、拖动、轮播和报价逻辑不变。
 - Logo、背景和底部信号栏沿用原有视觉资产与动画，只调整可用尺寸和边界。
 - 安全区域由各自所属的页面/模块边界处理，避免同一模块重复叠加底部 inset。
 
