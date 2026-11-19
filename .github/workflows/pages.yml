@@ -172,6 +172,7 @@ jobs:
               ("complete 24-symbol scan universe", "complete 22-symbol scan universe"),
               ('INSTRUMENTS.length!==24', 'INSTRUMENTS.length!==22'),
               ("24-symbol V8 local pool", "22-symbol V8 local pool"),
+              ("V8 runtime must use the 24-symbol local pool", "V8 runtime must use the 22-symbol local pool"),
               ("24-symbol V12 feed", "22-symbol V12 feed"),
           ])
           for doc in ("README.md", "docs/SEVEN-SYSTEMS.md", "docs/V6-BASELINE.md"):
