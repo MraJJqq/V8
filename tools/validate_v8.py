@@ -203,7 +203,7 @@ if not scan_block or len(re.findall(r'"[A-Z0-9]+"', scan_block.group(1))) != 22:
     fail("V12 feed validation must retain its complete 22-symbol scan universe")
 runtime = (ROOT / "modules/v6-runtime.js").read_text(encoding="utf-8")
 if "INSTRUMENTS.length!==22" not in runtime:
-    fail("V8 runtime must use the 24-symbol local pool")
+    fail("V8 runtime must use the 22-symbol local pool")
 
 if errors:
     print("V8 validation FAILED:")
