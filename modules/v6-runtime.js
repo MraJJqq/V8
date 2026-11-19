@@ -25,7 +25,7 @@ const firstIndex=sessionQueue.findIndex(item=>item.symbol!==previous);
 if(firstIndex>0)sessionQueue=[...sessionQueue.slice(firstIndex),...sessionQueue.slice(0,firstIndex)];
 else if(firstIndex<0&&sessionQueue.length>1)sessionQueue.push(sessionQueue.shift());
 try{localStorage.setItem(RANDOM_START,sessionQueue[0].symbol)}catch(_){}
-if(INSTRUMENTS.length!==24||Object.keys(GATE_CONTRACTS).length!==INSTRUMENTS.length)throw new Error("V6 instrument universe mismatch");
+if(INSTRUMENTS.length!==22||Object.keys(GATE_CONTRACTS).length!==INSTRUMENTS.length)throw new Error("V6 instrument universe mismatch");
 const GATE_INSTRUMENTS=INSTRUMENTS.map(item=>Object.freeze({...item,gateContract:GATE_CONTRACTS[item.symbol]}));
 if(GATE_INSTRUMENTS.some(item=>!item.gateContract))throw new Error("V6 Gate contract mapping incomplete");
 function sendLogoSymbol(index=logoIndex){const item=sessionQueue[index];if(item&&logoFrame?.contentWindow)logoFrame.contentWindow.postMessage({type:"VEGAS_LOGO_SET_SYMBOL",symbol:item.symbol},location.origin);}
