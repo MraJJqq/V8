@@ -13,7 +13,7 @@
 
 - `Backgrounds/`：背景 SVG、生成图及生成源代码；背景更新频繁，独立维护。
 - `Brand/`：品牌 SVG 与 App 图标。
-- `Logos/`：24 个品种 SVG。
+- `Logos/`：22 个品种 SVG。
 - `Cards/`：行情卡片视觉模板。
 - `Charts/`：EMA 配色与 K 线视觉规范。
 - `References/`：品种映射、V12 数据接口和 Vegas 规则说明。
