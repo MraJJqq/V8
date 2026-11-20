@@ -1,18 +1,16 @@
 # V6 品种与交易所映射
 
-唯一品种清单来源：`V6/modules/shared/universe-v6.js`。Gate 永续合约映射来源：`V6/modules/shared/gate-universe.js`。共 24 个品种（V8 本地资金池）。V12 扫描池与 V8 本地资金池统一为 24 个品种。
+唯一品种清单来源：`modules/shared/instrument-catalog.js`。V8 本地资金池与 V12 扫描池统一为 **22 个品种**：18 个美股/Pre-IPO 合约 + 4 个核心品种。
 
-V12 公共信号使用逻辑合约代码（例如 `AAPLUSDT`）；V6 的 K 线和卡片行情使用 Gate USDT 永续合约代码（例如 `AAPL_USDT`）。两种代码用途不同，不得互换。
+V12 公共信号使用 Bitget USDT 永续逻辑合约代码（例如 `OPENAIUSDT`）；V6 的 K 线和卡片行情使用 Gate USDT 永续合约代码（例如 `OPENAI_USDT`）。两种代码用途不同，不得互换。
 
 | 显示代码 | V12 信号代码 | Gate USDT 永续合约 |
 |---|---|---|
-| AAPL | AAPLUSDT | AAPL_USDT |
 | MSFT | MSFTUSDT | MSFT_USDT |
 | GOOGL | GOOGLUSDT | GOOGL_USDT |
 | AMZN | AMZNUSDT | AMZN_USDT |
 | NVDA | NVDAUSDT | NVDA_USDT |
-| TSLA | TSLAUSDT | TSLA_USDT |
-| INTC | INTCUSDT | INTC_USDT |
+| OPENAI | OPENAIUSDT | OPENAI_USDT |
 | AMD | AMDUSDT | AMD_USDT |
 | TSM | TSMUSDT | TSM_USDT |
 | AVGO | AVGOUSDT | AVGO_USDT |
@@ -31,4 +29,4 @@ V12 公共信号使用逻辑合约代码（例如 `AAPLUSDT`）；V6 的 K 线�
 | XAU | XAUUSDT | XAU_USDT |
 | CL | CLUSDT | CL_USDT |
 
-分类边界：前 20 个为“美股巨头”，后 4 个为“核心能源”。SKHYNIX 的 V12 代码为 `SKHYUSDT`，显示代码仍为 `SKHYNIX`。
+分类边界：前 18 个为“美股/Pre-IPO”，后 4 个为“核心能源”。SKHYNIX 的 V12 代码为 `SKHYUSDT`，显示代码仍为 `SKHYNIX`。
