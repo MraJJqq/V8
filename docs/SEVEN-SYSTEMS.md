@@ -58,7 +58,7 @@ Sources:
 - `cards/rolling-cards.css`
 
 Operating flow:
-1. Build the fixed 24-card set once from the instrument list and attach it to the rolling-card viewport.
+1. Build the fixed 22-card set once from the instrument list and attach it to the rolling-card viewport.
 2. Resolve each card's logo through the local `assets/logos/Core` or `assets/logos/Stocks` paths.
 3. Maintain price/open/change state in fixed-size arrays. Update only dirty card text; off-screen cards defer text refresh until they re-enter view.
 4. Calculate the ring layout when the viewport dimensions change; animate the ring using the module's animation loop.
@@ -131,7 +131,7 @@ Operating flow:
 
 ## Local assets and dependencies
 
-- Logos: `assets/logos/Core` and `assets/logos/Stocks` (22 active SVG files).
+- Logos: `assets/logos/Core` and `assets/logos/Stocks` (22 SVG files).
 - Font: `assets/fonts/ChakraPetch-Bold.ttf`.
 - App icons: `assets/icons/App-Icon.svg` and `assets/icons/App-Icon-180.png`.
 - Page-level and outer-container geometry: `assets/css/full-screen-dynamic.css` (single authority).
