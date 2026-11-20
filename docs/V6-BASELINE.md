@@ -1,7 +1,7 @@
 # VEGAS V6
 
 ## Runtime
-- V8 local pool: 22 instruments. V12 continues scanning its independent complete 22-symbol universe; V8 validates the full feed and displays only its 24 local instruments.
+- V8 local pool: 22 instruments. V12 continues scanning its independent complete 22-symbol universe; V8 validates the full feed and displays all 22 instruments.
 - The 22-symbol catalog, Gate contract derivation, and logo asset mapping are maintained in one local catalog shared by the card and logo modules.
 - Internal ES-module imports use canonical URLs so one shared module is not instantiated again under a different query string.
 - 页面编排采用统一的模块生命周期、轮播、淡入淡出、交互锁与前后台暂停管理；仅适配 Gate 数据源。
