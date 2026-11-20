@@ -124,7 +124,7 @@ Sources:
 Operating flow:
 1. Read `https://raw.githubusercontent.com/MraJJqq/v12/main/v12/public-signals.json`.
 2. Cache a successful payload for 30 seconds; requests have a 10-second timeout and are skipped while the page is hidden.
-3. Validate source name, schema version, current Beijing signal day, completed full-pool scan status, and exact 24-symbol universe.
+3. Validate source name, schema version, current Beijing signal day, completed full-pool scan status, and exact 22-symbol universe.
 4. The ticker accepts only a complete valid V12 payload. Formal signals are matched against the V6 contract universe and rendered into their instrument groups.
 5. The ticker creates a continuous marquee. Resize/layout recalculations preserve the existing animation timeline rather than restarting it.
 6. Invalid, incomplete or unavailable feed data is represented as a waiting/unavailable state; it is not treated as a formal signal.
