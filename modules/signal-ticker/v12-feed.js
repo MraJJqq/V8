@@ -1,6 +1,6 @@
 
 const DEFAULT_URL = "https://raw.githubusercontent.com/MraJJqq/v12/main/v12/public-signals.json";
-const V12_SCAN_SYMBOLS = Object.freeze(["MSFT","GOOGL","AMZN","NVDA","INTC","AMD","TSM","AVGO","ORCL","ARM","MU","ASML","SNDK","SKHY","MRVL","GLW","HOOD","SPCX","BTC","HYPE","XAU","CL"]);
+const V12_SCAN_SYMBOLS = Object.freeze(["MSFT","GOOGL","AMZN","NVDA","OPENAI","AMD","TSM","AVGO","ORCL","ARM","MU","ASML","SNDK","SKHY","MRVL","GLW","HOOD","SPCX","BTC","HYPE","XAU","CL"]);
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_CACHE_MS = 30_000;
 
