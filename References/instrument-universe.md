@@ -1,6 +1,6 @@
 # V6 品种与交易所映射
 
-唯一品种清单来源：`V6/modules/shared/instrument-catalog.js`。V8 本地资金池与 V12 扫描池统一为 **22 个品种**：18 个美股/Pre-IPO 合约 + 4 个核心品种。
+唯一品种清单来源：`modules/shared/instrument-catalog.js`。V8 本地资金池与 V12 扫描池统一为 **22 个品种**：18 个美股合约 + 4 个核心品种。
 
 V12 公共信号使用 Bitget USDT 永续逻辑合约代码（例如 `OPENAIUSDT`）；V6 的 K 线和卡片行情使用 Gate USDT 永续合约代码（例如 `OPENAI_USDT`）。两种代码用途不同，不得互换。
 
@@ -29,4 +29,4 @@ V12 公共信号使用 Bitget USDT 永续逻辑合约代码（例如 `OPENAIUSDT
 | XAU | XAUUSDT | XAU_USDT |
 | CL | CLUSDT | CL_USDT |
 
-分类边界：前 18 个为“美股/Pre-IPO”，后 4 个为“核心能源”。SKHYNIX 的 V12 代码为 `SKHYUSDT`，显示代码仍为 `SKHYNIX`。
+分类边界：前 18 个为“美股巨头”，后 4 个为“核心能源”。SKHYNIX 的 V12 代码为 `SKHYUSDT`，显示代码仍为 `SKHYNIX`。
