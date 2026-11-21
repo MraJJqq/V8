@@ -58,25 +58,30 @@ jobs:
               raise SystemExit("No catalog entries resolved to Gate USDT futures contracts; refusing to publish an all-zero audit.")
 
           def get_candles(contract, interval, step):
+              # Match V8 range pagination: bounded from/to windows, no oversized limit.
               rows, cursor = [], start
               while cursor <= now:
-                  params = urllib.parse.urlencode({"contract":contract,"interval":interval,"from":cursor,"to":now,"limit":2000})
+                  end = min(now, cursor + 1999 * step)
+                  params = urllib.parse.urlencode({"contract":contract,"interval":interval,"from":cursor,"to":end})
                   req = urllib.request.Request(base + "/candlesticks?" + params, headers={"Accept":"application/json","User-Agent":"V8-read-only-kline-audit/1.0"})
-                  with urllib.request.urlopen(req, timeout=30) as r:
-                      batch = json.load(r)
+                  try:
+                      with urllib.request.urlopen(req, timeout=30) as r:
+                          batch = json.load(r)
+                  except urllib.error.HTTPError as e:
+                      detail = e.read().decode("utf-8", "replace")[:500]
+                      raise RuntimeError(f"Gate HTTP {e.code}: {detail}") from e
                   if not isinstance(batch, list):
                       raise RuntimeError("unexpected API payload")
-                  if not batch: break
-                  parsed = []
-                  for item in batch:
-                      t = int(item.get("t", 0))
-                      if t > 0: parsed.append(t)
-                  if not parsed: break
+                  if not batch:
+                      break
+                  parsed = [int(item.get("t", 0)) for item in batch if int(item.get("t", 0)) > 0]
+                  if not parsed:
+                      break
                   rows.extend(parsed)
                   nxt = max(parsed) + step
-                  if nxt <= cursor: break
+                  if nxt <= cursor:
+                      raise RuntimeError("Gate pagination stalled")
                   cursor = nxt
-                  if len(batch) < 2000: break
                   time.sleep(0.12)
               return sorted(set(rows))
 
