@@ -242,6 +242,18 @@ runtime = (ROOT / "modules/v6-runtime.js").read_text(encoding="utf-8")
 if "INSTRUMENTS.length!==22" not in runtime:
     fail("V8 runtime must use the 22-symbol local pool")
 
+source_lock_path = ROOT / ".media-source-sha"
+provenance_path = ROOT / "docs/MEDIA-SOURCE-COMMIT.md"
+if not source_lock_path.is_file() or not re.fullmatch(r"[0-9a-f]{40}", source_lock_path.read_text(encoding="utf-8").strip()):
+    fail("a valid pinned Media source commit is required")
+if not provenance_path.is_file() or source_lock_path.read_text(encoding="utf-8").strip() not in provenance_path.read_text(encoding="utf-8"):
+    fail("deployed Media source provenance does not match the pinned commit")
+operating_docs = ROOT / "docs/SEVEN-SYSTEMS.md"
+if operating_docs.is_file():
+    docs_source = operating_docs.read_text(encoding="utf-8")
+    if "gate-universe.js" in docs_source or "updateQuote / updateQuotes" in docs_source:
+        fail("operating-flow documentation contains obsolete module or card API references")
+
 if errors:
     print("V8 validation FAILED:")
     for error in errors:

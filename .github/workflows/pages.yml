@@ -24,14 +24,18 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Fetch complete Media library
-        run: git clone --depth 1 https://github.com/MraJJqq/Media.git /tmp/vegas-media
+        run: git clone --no-checkout https://github.com/MraJJqq/Media.git /tmp/vegas-media
 
       - name: Migrate, validate and deploy V8
         shell: bash
         run: |
           set -euo pipefail
           SRC=/tmp/vegas-media
+          MEDIA_SHA="$(tr -d '[:space:]' < .media-source-sha)"
+          if [[ ! "$MEDIA_SHA" =~ ^[0-9a-f]{40}$ ]]; then echo "Invalid .media-source-sha"; exit 1; fi
+          git -C "$SRC" checkout --detach "$MEDIA_SHA"
           mkdir -p docs tools
+          printf '# Media source commit\n\n`%s`\n' "$MEDIA_SHA" > docs/MEDIA-SOURCE-COMMIT.md
 
           # Copy the complete seven-system runtime from the Media baseline, including aligned 2H history repair and its tests.
           cp -a "$SRC/V6/assets" .
@@ -60,6 +64,7 @@ jobs:
           s = s.replace("# VEGAS V6 — System Modules & Operating Flows", "# VEGAS V8 — System Modules & Operating Flows", 1)
           s = s.replace("This directory documents the seven V6 systems.", "This directory documents the seven V8 systems.", 1)
           s = s.replace("This Media-specific operating-flow document is not part of the V6 runtime repository.", "This V8 deployment document describes the seven-system runtime synchronized from the Media V6 baseline.", 1)
+          s = s.replace("This package records the seven V6 systems.", "This package records the seven V8 systems.", 1)
           p.write_text(s, encoding="utf-8")
           PY
 
@@ -83,7 +88,7 @@ jobs:
           - K线与卡片行情：Gate USDT 永续合约。
           - 正式信号：V12 公共信号 JSON；V8 使用 Media 定义的 22 品种本地池。
           - 22 个启用品种 Logo、字体、图标、CSS、模块和页面资源均在本仓库本地保存。
-          - 背景原始素材统一保留在 Media `Backgrounds/`；未被页面引用的背景不复制进 V8 运行目录。
+          - `Backgrounds/` 完整素材目录从锁定的 Media 提交同步；网页只通过实际引用路径加载背景。
           - 五个周期共用同一套视窗状态，不拆分为各周期独立视窗。
 
           ## 目录
