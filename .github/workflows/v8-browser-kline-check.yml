@@ -1,0 +1,131 @@
+name: V8 browser K-line validation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/v8-browser-kline-check.yml"
+      - "index.html"
+      - "kline/**"
+      - "modules/**"
+      - "assets/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v8-browser-kline-validation
+  cancel-in-progress: false
+
+jobs:
+  browser-kline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout validation definition
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Chromium test runtime
+        run: |
+          npm install --no-save --package-lock=false playwright@1.55.0
+          npx playwright install --with-deps chromium
+
+      - name: Validate deployed page across all 22 instruments and 5 timeframes
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { chromium } from 'playwright';
+          import fs from 'node:fs/promises';
+
+          const baseUrl = 'https://mrajjqq.github.io/V8/';
+          const symbols = ['MSFT','GOOGL','AMZN','NVDA','OPENAI','AMD','TSM','AVGO','ORCL','ARM','MU','ASML','SNDK','SKHYNIX','MRVL','GLW','HOOD','SPCX','BTC','HYPE','XAU','CL'];
+          const timeframes = ['1H','2H','4H','8H','D'];
+          const results = [];
+          const pageErrors = [];
+          const failedGateRequests = [];
+          const browser = await chromium.launch({ headless: true });
+          const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+          const page = await context.newPage();
+
+          page.on('pageerror', error => pageErrors.push(String(error?.stack || error)));
+          page.on('requestfailed', request => {
+            if (request.url().includes('api.gateio.ws')) failedGateRequests.push({ url: request.url(), error: request.failure()?.errorText || 'request failed' });
+          });
+          page.on('response', response => {
+            if (response.url().includes('api.gateio.ws') && response.status() >= 400) failedGateRequests.push({ url: response.url(), status: response.status() });
+          });
+
+          try {
+            await page.goto(baseUrl + '?browser-validation=1', { waitUntil: 'domcontentloaded', timeout: 60000 });
+            await page.waitForFunction(() => Boolean(window.V6Kline && document.querySelector('#kline-host canvas')), null, { timeout: 45000 });
+            await page.locator('#kline-host').dblclick({ delay: 90 });
+            await page.waitForTimeout(500);
+
+            for (const timeframe of timeframes) {
+              if (timeframe !== '4H') {
+                await page.frameLocator('#timeframe-frame').locator('.tf button').filter({ hasText: timeframe }).first().click({ timeout: 15000 });
+                await page.waitForFunction(tf => window.V6Kline?.state?.timeframe === tf, timeframe, { timeout: 20000 });
+              }
+
+              for (const symbol of symbols) {
+                await page.evaluate(sym => window.V6Kline.select(sym), symbol);
+                let observed = null;
+                try {
+                  await page.waitForFunction(({ sym, tf }) => {
+                    const state = window.V6Kline?.state;
+                    const host = document.querySelector('#kline-host');
+                    return state?.symbol === sym &&
+                      state?.timeframe === tf &&
+                      state.count > 0 &&
+                      host?.dataset.emaHistorySymbol === sym &&
+                      Number(host?.dataset.emaHistoryCount || 0) > 0;
+                  }, { sym: symbol, tf: timeframe }, { timeout: 18000 });
+                  await page.waitForTimeout(180);
+                  observed = await page.evaluate(() => {
+                    const canvases = [...document.querySelectorAll('#kline-host canvas')];
+                    return canvases.map(canvas => {
+                      const ctx = canvas.getContext('2d');
+                      let paintedPixels = 0;
+                      if (ctx && canvas.width && canvas.height) {
+                        const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+                        for (let i = 3; i < pixels.length; i += 4) if (pixels[i] > 0) paintedPixels++;
+                      }
+                      return { width: canvas.width, height: canvas.height, paintedPixels };
+                    });
+                  });
+                  const state = await page.evaluate(() => window.V6Kline.state);
+                  const candleCanvas = observed[0];
+                  const ok = Boolean(candleCanvas && candleCanvas.width > 0 && candleCanvas.height > 0 && candleCanvas.paintedPixels > 0);
+                  results.push({ symbol, timeframe, ok, candleCount: state.count, canvases: observed });
+                  console.log(JSON.stringify(results[results.length - 1]));
+                } catch (error) {
+                  const state = await page.evaluate(() => window.V6Kline?.state || null).catch(() => null);
+                  results.push({ symbol, timeframe, ok: false, error: String(error?.message || error), state });
+                  console.log(JSON.stringify(results[results.length - 1]));
+                }
+              }
+            }
+          } finally {
+            await fs.writeFile('v8-browser-kline-results.json', JSON.stringify({ baseUrl, tested: results.length, passed: results.filter(x => x.ok).length, failed: results.filter(x => !x.ok).length, pageErrors, failedGateRequests, results }, null, 2));
+            await browser.close();
+          }
+
+          const failed = results.filter(x => !x.ok);
+          console.log(`BROWSER K-LINE RESULT: ${results.filter(x => x.ok).length}/${results.length} passed; ${failed.length} failed; ${pageErrors.length} page errors.`);
+          if (results.length !== 110 || failed.length || pageErrors.length) process.exitCode = 1;
+          NODE
+
+      - name: Upload browser validation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v8-browser-kline-validation
+          path: v8-browser-kline-results.json
+          if-no-files-found: warn
+          retention-days: 14
