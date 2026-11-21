@@ -186,6 +186,11 @@ if "userRotationPaused" not in runtime_source:
 controller = (ROOT / "kline/gate-kline-controller.js").read_text(encoding="utf-8")
 if "start+7200<=currentHour" not in controller or "items.length===2" not in controller:
     fail("historical 2H buckets must require both aligned 1H candles")
+if "twoHourRangeWindows" not in controller or "twoHourRangeWindows(from,to)" not in controller:
+    fail("2H historical gap repair must use paired, aligned hourly request windows")
+kline_tests = (ROOT / "tests/kline-controller.test.mjs").read_text(encoding="utf-8")
+if "2H historical gap windows include the second 1H candle" not in kline_tests:
+    fail("2H historical gap paging boundary test is missing")
 if "items.length===1&&isCurrent&&first.t===currentHour" not in controller:
     fail("the active 2H bucket must preserve its current partial 1H candle")
 if 'page=await older(c,tf,rows[0].t);' not in controller:
