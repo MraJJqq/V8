@@ -3,13 +3,13 @@
 ## Repository ownership
 
 - Media owns the notification display template and schema/interface reference only.
-- V12 owns Bitget data collection, Vegas signal calculation, full-pool scanning and publication of the completed schema v1 snapshot.
+- V13 owns Bitget data collection, Vegas signal calculation, full-pool scanning and publication of the completed schema v1 snapshot.
 - Bark is the sole owner of notification delivery, per-slot idempotency, durable outbox, retry state and the public snapshot consumed by V8.
 - V8 reads only the public snapshot in Bark and renders the bottom ticker. It does not call the Bark notification API.
 
 ## Data path
 
-V12 complete scan -> V12 public-signals.json -> publish to MraJJqq/Bark -> Bark notification workflow -> Bark raw public JSON -> V8 ticker.
+V13 complete scan -> V13 public-signals.json -> publish to MraJJqq/Bark -> Bark notification workflow -> Bark raw public JSON -> V8 ticker.
 
 ## Delivery identity
 
@@ -24,4 +24,4 @@ Bark persists the send intent before contacting the Bark API. HTTP 429 uses boun
 
 ## Secrets
 
-BARK_DEVICE_KEY exists only in Bark repository Actions secrets. SIGNAL_RELAY_TOKEN exists only in V12 repository Actions secrets and is used to publish the public snapshot into Bark. Neither secret belongs in Media or V8.
+BARK_DEVICE_KEY exists only in Bark repository Actions secrets. SIGNAL_RELAY_TOKEN exists only in V13 repository Actions secrets and is used to publish the public snapshot into Bark. Neither secret belongs in Media or V8.
