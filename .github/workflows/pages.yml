@@ -40,6 +40,7 @@ jobs:
           cp -a "$SRC/V6/assets" .
           cp -a "$SRC/V6/cards" .
           cp -a "$SRC/V6/kline" .
+          cp -a "$SRC/V6/tests" .
           cp -a "$SRC/V6/modules" .
           cp "$SRC/V6/index.html" ./index.html
           cp "$SRC/V6/README.md" docs/V6-BASELINE.md
