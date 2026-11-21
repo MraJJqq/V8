@@ -31,7 +31,7 @@ jobs:
         run: |
           set -euo pipefail
           SRC=/tmp/vegas-media
-          mkdir -p docs tools assets/backgrounds
+          mkdir -p docs tools
 
           # Copy the complete seven-system runtime from the Media baseline, including aligned 2H history repair and its tests.
           cp -a "$SRC/V6/assets" .
@@ -48,7 +48,6 @@ jobs:
             cp -a "$SRC/$dir" .
           done
           cp "$SRC/README.md" docs/MEDIA-LIBRARY-README.md
-          cp "$SRC/Backgrounds/V6-Dark-Galaxy.svg" assets/backgrounds/V6-Dark-Galaxy.svg
 
           # V8 branding only; runtime and display behavior remain Media-derived.
           sed -i 's/<title>VEGAS V6 · Gate<\/title>/<title>VEGAS V8 · Gate<\/title>/' index.html
@@ -84,7 +83,7 @@ jobs:
           - K线与卡片行情：Gate USDT 永续合约。
           - 正式信号：V12 公共信号 JSON；V8 使用 Media 定义的 22 品种本地池。
           - 22 个启用品种 Logo、字体、图标、CSS、模块和页面资源均在本仓库本地保存。
-          - 背景原始素材保留在 `Backgrounds/`；网页实际使用的背景副本位于 `assets/backgrounds/`。
+          - 背景原始素材统一保留在 Media `Backgrounds/`；未被页面引用的背景不复制进 V8 运行目录。
           - 五个周期共用同一套视窗状态，不拆分为各周期独立视窗。
 
           ## 目录
