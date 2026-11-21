@@ -1,17 +1,18 @@
 # VEGAS V8 — System Modules & Operating Flows
 
-This directory documents the six V8 systems. It is maintained against the current files in this directory; V8 deployment records the exact Media commit used for each build. The GitHub Pages workflow and generated deployment output are build artifacts; canonical background artwork and its generator are maintained separately under `../Backgrounds/`.
+This directory documents the seven V8 systems. It is maintained against the current files in this directory; V8 deployment records the exact Media commit used for each build. The GitHub Pages workflow and generated deployment output are build artifacts; canonical background artwork and its generator are maintained separately under `../Backgrounds/`.
 
 ## Scope
 
-This package records the six V6 systems:
+This package records the seven V6 systems:
 
 1. K-line system.
 2. Viewport and gesture system.
 3. Rolling market-card system.
 4. Logo and countdown system.
 5. Timeframe selector system.
-6. Full-screen dynamic system: responsive viewport sizing, portrait/landscape rules and safe-area adaptation.
+6. V12 signal feed and bottom ticker system.
+7. Full-screen dynamic system: responsive viewport sizing, portrait/landscape rules and safe-area adaptation.
 
 Background artwork is maintained in `../Backgrounds/`; the background-generation source is maintained in `../Backgrounds/source/`. These assets are intentionally stored outside this V6 runtime snapshot.
 
@@ -19,13 +20,13 @@ Background artwork is maintained in `../Backgrounds/`; the background-generation
 
 Entry: `index.html` → `modules/v6-runtime.js`.
 
-1. Load the shared lifecycle manager, page lifecycle manager, 22-instrument universe, Gate contract map, K-line view and Gate K-line controller.
+1. Load the shared lifecycle manager, page lifecycle manager, 22-instrument universe, Gate contract map, V12 feed, signal ticker, K-line view and Gate K-line controller.
 2. Restore the selected timeframe from local storage key `vegas-v6-selected-timeframe`; accepted values are `1H`, `2H`, `4H`, `8H`, and `D`. Default is `4H`.
 3. Build the 22-item session rotation queue. The first symbol is selected so it differs from the previous session's first symbol when possible; the previous start is stored as `vegas-v6-last-random-start`.
 4. Verify that the instrument universe and Gate contract map both contain exactly 22 complete entries.
-5. Initialize the K-line view/controller. The host page sends state to the Logo and timeframe iframe modules using same-origin `postMessage`.
+5. Initialize the K-line view/controller, V12 feed and ticker. The host page sends state to the Logo and timeframe iframe modules using same-origin `postMessage`.
 6. Rotate symbols through the session queue. The runtime uses a 7-second display interval and a 1.5-second transition stage; active user interaction locks pause rotation.
-7. Refresh Gate card quotes only while the page is active. Page lifecycle suspension prevents background work and resumes the runtime when visible again.
+7. Refresh V12 signals and Gate card quotes only while the page is active. Page lifecycle suspension prevents background work and resumes the runtime when visible again.
 8. On teardown, stop timers, requests, subscriptions and lifecycle-owned resources.
 
 The host page owns coordination. Child modules own their rendering and interaction details; the host passes state through explicit messages rather than reaching into their internal DOM.
@@ -47,7 +48,7 @@ Responsibilities:
 - Coordinate page visibility, pagehide/pageshow and suspended/resumed work.
 - Own page-level timers and cleanups; prevent hidden-page polling and animation work.
 - Coordinate symbol selection, timeframe changes, K-line state and user-interaction locks.
-- The sixth system, `assets/css/full-screen-dynamic.css`, is the single authority for page-level viewport and outer-container geometry across the background, K-line, Logo iframe, timeframe iframe, rolling-card frame/ring/viewport. It owns dynamic viewport height, safe-area insets, portrait/landscape sizing and responsive constraints, including the Logo outer frame.
+- The seventh system, `assets/css/full-screen-dynamic.css`, is the single authority for page-level viewport and outer-container geometry across the background, K-line, Logo iframe, timeframe iframe, rolling-card frame/ring/viewport and signal ticker. It owns dynamic viewport height, safe-area insets, portrait/landscape sizing and responsive constraints, including the Logo outer frame.
 - `assets/css/v6-modules.css`, `cards/rolling-cards.css` and `modules/timeframe-switch/host.css` retain presentation, animation and interaction responsibilities; they must not reintroduce competing page-root or outer-frame geometry.
 
 ## Rolling market cards
@@ -114,6 +115,20 @@ Operating flow:
 
 Supported intervals in this system are `1H`, `2H`, `4H`, `8H`, and `D`. Data source is Gate USDT perpetual futures.
 
+## Bark-hosted V12 signal feed and bottom ticker
+
+Sources:
+- `modules/signal-ticker/v12-feed.js`
+- `modules/signal-ticker/ticker.js`
+
+Operating flow:
+1. Read `https://raw.githubusercontent.com/MraJJqq/Bark/main/public-signals.json`. V12 remains the scan and signal-generation source; its complete snapshot is published into the independent Bark repository.
+2. Cache a successful payload for 30 seconds; requests have a 10-second timeout and are skipped while the page is hidden.
+3. Validate source name, schema version, current Beijing signal day, completed full-pool scan status, and exact 22-symbol universe.
+4. The ticker accepts only a complete valid V12 payload. Formal signals are matched against the V6 contract universe and rendered into their instrument groups.
+5. The ticker creates a continuous marquee. Resize/layout recalculations preserve the existing animation timeline rather than restarting it.
+6. Invalid, incomplete or unavailable feed data is represented as a waiting/unavailable state; it is not treated as a formal signal.
+
 ## Local assets and dependencies
 
 - Logos: `assets/logos/Core` and `assets/logos/Stocks` (22 SVG files).
@@ -121,7 +136,7 @@ Supported intervals in this system are `1H`, `2H`, `4H`, `8H`, and `D`. Data sou
 - App icons: `assets/icons/App-Icon.svg` and `assets/icons/App-Icon-180.png`.
 - Page-level and outer-container geometry: `assets/css/full-screen-dynamic.css` (single authority).
 - Module presentation and interaction: `assets/css/v6-modules.css`, `cards/rolling-cards.css` and `modules/timeframe-switch/host.css`.
-- Runtime data providers: Gate USDT perpetual REST/WebSocket APIs.
+- Runtime data providers: Gate USDT perpetual REST/WebSocket APIs and the V12 public JSON feed.
 - Browser capabilities: Fetch, WebSocket, IndexedDB, localStorage, postMessage, Page Visibility API, ResizeObserver and animation-frame scheduling.
 
 ## Validation checklist
@@ -131,5 +146,6 @@ Supported intervals in this system are `1H`, `2H`, `4H`, `8H`, and `D`. Data sou
 - Confirm all five intervals propagate from selector → host runtime → K-line controller → Logo countdown.
 - Confirm hidden-page suspension stops polling/animation work and visible-page restoration resumes it.
 - Confirm K-line history/cache/live update and viewport persistence.
-- Confirm cards, Logo, timeframe selector, K-line and full-screen dynamic adaptation remain coordinated without altering their locked business behavior.
+- Confirm V12 payload validation rejects stale-day, partial-pool, duplicate or foreign-symbol data.
+- Confirm cards, Logo, timeframe selector, K-line, ticker and full-screen dynamic adaptation remain coordinated without altering their locked business behavior.
 
