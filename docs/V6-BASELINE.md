@@ -1,5 +1,7 @@
 # VEGAS V6
 
+> 本目录是 V8 网页部署使用的六系统运行源码基线。V6 是内部源码/兼容命名空间，V8 是部署版本标识。模块路径、IndexedDB 数据库名及 localStorage 键中的 V6 前缀为兼容标识，未经专项迁移不得重命名。
+
 ## Runtime
 - V8 local pool: 22 instruments. V12 continues scanning its independent complete 22-symbol universe; V8 validates the full feed and displays all 22 instruments.
 - The 22-symbol catalog, Gate contract derivation, and logo asset mapping are maintained in one local catalog shared by the card and logo modules.

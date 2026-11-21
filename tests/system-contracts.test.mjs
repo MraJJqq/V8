@@ -107,6 +107,16 @@ test("responsive layout contracts retain dynamic viewport and safe-area handling
 });
 
 
+test("K-line touch gestures retain pan, pinch zoom and host interaction locking", async () => {
+  const view = await source("kline/v6-kline-view.js");
+  assert.match(view, /pointerdown/);
+  assert.match(view, /pointermove/);
+  assert.match(view, /startPinch/);
+  assert.match(view, /updatePinch/);
+  assert.match(view, /interaction\("kline-pointer",true\)/);
+  assert.match(view, /interaction\("kline-pointer",false\)/);
+});
+
 test("all 22 catalog logos resolve to real local SVG assets", async () => {
   for (const item of INSTRUMENTS) {
     assert.ok(item.logo && item.logoGroup, `missing logo mapping for ${item.symbol}`);
