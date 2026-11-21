@@ -39,8 +39,23 @@ jobs:
           contract_req = urllib.request.Request(base + "/contracts", headers={"Accept":"application/json","User-Agent":"V8-read-only-kline-audit/1.0"})
           with urllib.request.urlopen(contract_req, timeout=30) as r:
               contracts = json.load(r)
-          known = {x.get("name") for x in contracts if isinstance(x, dict)}
-          valid = {sym: contract in known for sym, contract in symbols}
+          known = {str(x.get("name","")).upper(): x for x in contracts if isinstance(x, dict)}
+          def resolve_gate_contract(symbol, catalog_contract):
+              # V8 catalog stores compact display IDs (e.g. BTCUSDT); Gate API
+              # futures contract IDs use an underscore before settlement (BTC_USDT).
+              compact = str(catalog_contract or "").upper().replace("-", "_")
+              candidates = [compact]
+              if compact.endswith("USDT"):
+                  candidates.append(compact[:-4] + "_USDT")
+              candidates.append(str(symbol).upper() + "_USDT")
+              for candidate in candidates:
+                  if candidate in known:
+                      return candidate
+              return None
+          resolved = {sym: resolve_gate_contract(sym, contract) for sym, contract in symbols}
+          valid = {sym: resolved[sym] is not None for sym, _ in symbols}
+          if not any(valid.values()):
+              raise SystemExit("No catalog entries resolved to Gate USDT futures contracts; refusing to publish an all-zero audit.")
 
           def get_candles(contract, interval, step):
               rows, cursor = [], start
@@ -70,10 +85,13 @@ jobs:
 
           def add(sym, contract, tf, interval, step, ts):
               gs = gaps(ts, step)
-              expected = (now // step) * step - step
+              step_ms = step * 1000
+              bucket_ms = (now * 1000 // step_ms) * step_ms
+              within_bucket_ms = now * 1000 - bucket_ms
+              expected = (bucket_ms - step_ms - (step_ms if within_bucket_ms < min(120000, step_ms / 10) else 0)) // 1000
               latest = ts[-1] if ts else None
               report.append({
-                  "symbol":sym,"contract":contract,"timeframe":tf,"api_interval":interval,
+                  "symbol":sym,"catalog_contract":next((x[1] for x in symbols if x[0]==sym),""),"contract":contract,"timeframe":tf,"api_interval":interval,
                   "contract_valid":valid[sym],"candles":len(ts),
                   "first_utc":datetime.datetime.fromtimestamp(ts[0],datetime.timezone.utc).isoformat() if ts else "",
                   "last_utc":datetime.datetime.fromtimestamp(latest,datetime.timezone.utc).isoformat() if latest else "",
@@ -83,10 +101,11 @@ jobs:
                   "status":"FAIL" if not valid[sym] or not ts or gs or latest is None or latest < expected-step else "PASS"
               })
 
-          for sym, contract in symbols:
-              if not valid[sym]:
+          for sym, catalog_contract in symbols:
+              contract = resolved[sym]
+              if not contract:
                   for tf, interval, step in [("1H","1h",3600),("2H","2h",7200),("4H","4h",14400),("8H","8h",28800),("1D","1d",86400)]:
-                      add(sym,contract,tf,interval,step,[])
+                      report.append({"symbol":sym,"catalog_contract":catalog_contract,"contract":"","timeframe":tf,"contract_valid":False,"candles":0,"gap_count":"","gap_examples":"","status":"INVALID_CONTRACT","error":"No exact Gate USDT futures contract match"})
                   continue
               try:
                   h1 = get_candles(contract,"1h",3600)
@@ -115,8 +134,9 @@ jobs:
           passed=sum(x.get("status")=="PASS" for x in report)
           failed=sum(x.get("status")=="FAIL" for x in report)
           errors=sum(x.get("status")=="ERROR" for x in report)
-          summary=f"## V8 K-line audit\n\n- Instruments: {len(symbols)}/22\n- Checks: {len(report)}/110\n- PASS: {passed}\n- FAIL: {failed}\n- ERROR: {errors}\n\n| Symbol | Timeframe | Candles | Gaps | Latest lag (bars) | Status |\n|---|---:|---:|---:|---:|---|\n"
-          summary += "".join(f"| {x['symbol']} | {x['timeframe']} | {x.get('candles','')} | {x.get('gap_count','')} | {x.get('latest_lag_bars','')} | {x.get('status')} |\n" for x in report)
+          invalid=sum(x.get("status")=="INVALID_CONTRACT" for x in report)
+          summary=f"## V8 K-line audit\n\n- Instruments: {sum(valid.values())}/22 resolved to Gate contracts\n- Checks: {len(report)}/110\n- PASS: {passed}\n- FAIL: {failed}\n- INVALID CONTRACT: {invalid}\n- ERROR: {errors}\n\n| Symbol | Gate contract | Timeframe | Candles | Gaps | Latest lag (bars) | Status |\n|---|---|---|---:|---:|---:|---|\n"
+          summary += "".join(f"| {x['symbol']} | {x.get('contract','')} | {x['timeframe']} | {x.get('candles','')} | {x.get('gap_count','')} | {x.get('latest_lag_bars','')} | {x.get('status')} |\n" for x in report)
           Path("/tmp/summary.md").write_text(summary)
           Path(__import__("os").environ["GITHUB_STEP_SUMMARY"]).write_text(summary)
           print(summary)
