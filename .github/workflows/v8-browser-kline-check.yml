@@ -64,6 +64,68 @@ jobs:
           try {
             await page.goto(baseUrl + '?browser-validation=1', { waitUntil: 'domcontentloaded', timeout: 60000 });
             await page.waitForFunction(() => Boolean(window.V6Kline && document.querySelector('#kline-host canvas')), null, { timeout: 45000 });
+
+            // This suite validates data loading, so pause the real rotation through its existing double-tap control.
+            await page.evaluate(() => {
+              const host = document.querySelector('#kline-host');
+              const tap = pointerId => {
+                const base = { bubbles: true, cancelable: true, pointerId, pointerType: 'touch', isPrimary: true, clientX: 16, clientY: 16, button: 0, buttons: 1 };
+                host.dispatchEvent(new PointerEvent('pointerdown', base));
+                host.dispatchEvent(new PointerEvent('pointerup', { ...base, buttons: 0 }));
+              };
+              tap(91); tap(92);
+            });
+            await page.waitForFunction(() => !document.querySelector('#app')?.classList.contains('is-symbol-transitioning'), null, { timeout: 10000 });
+            await page.waitForFunction(() => Boolean(window.V6Kline?.state?.symbol), null, { timeout: 45000 });
+            const pausedSymbol = await page.evaluate(() => window.V6Kline.state.symbol);
+            await page.waitForTimeout(9000);
+            const symbolAfterPause = await page.evaluate(() => window.V6Kline.state.symbol);
+            if (pausedSymbol !== symbolAfterPause) throw new Error(`Automatic rotation did not pause: ${pausedSymbol} -> ${symbolAfterPause}`);
+
+            await page.waitForFunction(() => window.V6Kline?.state?.count > 0, null, { timeout: 45000 });
+            async function exerciseTouchGestures(label) {
+              const result = await page.evaluate(() => {
+                const canvas = [...document.querySelectorAll('#kline-host canvas')].find(node => !node.hasAttribute('aria-hidden'));
+                const key = 'vegas-v6-kline-viewport-v2';
+                if (!canvas) return { error: 'K-line canvas not found' };
+                const before = JSON.parse(localStorage.getItem(key) || 'null');
+                if (!before) return { error: 'Viewport state was not persisted before gesture testing' };
+                const rect = canvas.getBoundingClientRect();
+                const x = fraction => rect.left + rect.width * fraction;
+                const y = fraction => rect.top + rect.height * fraction;
+                const send = (type, id, px, py, buttons) => canvas.dispatchEvent(new PointerEvent(type, {
+                  bubbles: true, cancelable: true, pointerId: id, pointerType: 'touch',
+                  isPrimary: id === 1, clientX: px, clientY: py, button: 0, buttons
+                }));
+                send('pointerdown', 1, x(0.45), y(0.5), 1);
+                send('pointermove', 1, x(0.50), y(0.5), 1);
+                send('pointerup', 1, x(0.50), y(0.5), 0);
+                const afterPan = JSON.parse(localStorage.getItem(key) || 'null');
+                send('pointerdown', 2, x(0.40), y(0.5), 1);
+                send('pointerdown', 3, x(0.60), y(0.5), 1);
+                send('pointermove', 2, x(0.30), y(0.5), 1);
+                send('pointermove', 3, x(0.70), y(0.5), 1);
+                send('pointerup', 2, x(0.30), y(0.5), 0);
+                send('pointerup', 3, x(0.70), y(0.5), 0);
+                const afterPinch = JSON.parse(localStorage.getItem(key) || 'null');
+                return {
+                  panChanged: Boolean(afterPan && (afterPan.anchorTime !== before.anchorTime || afterPan.anchorOffset !== before.anchorOffset)),
+                  pinchChanged: Boolean(afterPan && afterPinch && Math.abs(afterPinch.barW - afterPan.barW) > 0.1),
+                  before, afterPan, afterPinch
+                };
+              });
+              if (result.error || !result.panChanged || !result.pinchChanged) {
+                throw new Error(`${label} touch gesture validation failed: ${JSON.stringify(result)}`);
+              }
+              console.log(JSON.stringify({ test: 'touch-gestures', viewport: label, panChanged: result.panChanged, pinchChanged: result.pinchChanged }));
+            }
+            await exerciseTouchGestures('phone');
+            await page.setViewportSize({ width: 1024, height: 1366 });
+            await page.waitForTimeout(350);
+            await exerciseTouchGestures('tablet');
+            await page.setViewportSize({ width: 390, height: 844 });
+            await page.waitForTimeout(350);
+
             for (const timeframe of timeframes) {
               await page.evaluate(tf => window.V6Kline.setTimeframe(tf), timeframe);
               await page.waitForFunction(tf => window.V6Kline?.state?.timeframe === tf, timeframe, { timeout: 30000 });

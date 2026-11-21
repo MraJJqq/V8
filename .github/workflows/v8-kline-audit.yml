@@ -13,7 +13,7 @@ permissions:
 jobs:
   audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -34,7 +34,7 @@ jobs:
           symbols = [(x[0], x[1]) for x in defs]
           base = "https://api.gateio.ws/api/v4/futures/usdt"
           now = int(time.time())
-          start = now - 365 * 86400
+          start = 0
           PAGE = 2000
           report = []
 
@@ -93,19 +93,22 @@ jobs:
               rows = [int(x["t"]) for x in newest if valid_candle(x)]
               rows = sorted(set(rows))
               if not rows:
-                  return [], "latest endpoint returned no valid candles"
+                  return [], False, 0
               cursor = rows[0]
               pages = 0
+              history_boundary_reached = cursor <= start
               while cursor > start:
                   older_from = max(start, cursor - PAGE * step)
                   older_to = cursor - 1
                   if older_to <= older_from:
+                      history_boundary_reached = True
                       break
                   batch = api({"contract":contract, "interval":interval, "from":older_from, "to":older_to})
                   parsed = sorted(set(int(x["t"]) for x in batch if valid_candle(x)))
                   time.sleep(0.12)
                   if not parsed:
-                      # No older history is a natural listing/history boundary, not a reason to discard newest data.
+                      # Empty older range confirms the exchange listing/history boundary.
+                      history_boundary_reached = True
                       break
                   older = [t for t in parsed if t < cursor]
                   if not older:
@@ -116,9 +119,9 @@ jobs:
                       raise RuntimeError("Backward pagination did not move")
                   cursor = next_cursor
                   pages += 1
-                  if pages > 20:
-                      raise RuntimeError("Backward pagination exceeded safety limit")
-              return rows, "ok"
+                  if pages > 500:
+                      raise RuntimeError("Backward pagination exceeded 500-page safety limit")
+              return rows, history_boundary_reached, pages
 
           def gaps(ts, step):
               out = []
@@ -136,16 +139,26 @@ jobs:
               within = now * 1000 - bucket
               return (bucket - step_ms - (step_ms if within < min(120000, step_ms / 10) else 0)) // 1000
 
-          def add(sym, contract, tf, interval, step, ts, error=None):
+          def add(sym, contract, tf, interval, step, ts, history_boundary_reached=False, history_pages=0, error=None):
               gs = gaps(ts, step) if ts else []
               expected = expected_latest(step)
               latest = ts[-1] if ts else None
               lag = ((expected-latest)//step if latest is not None and expected > latest else 0) if latest is not None else ""
-              status = "ERROR" if error else ("NO_DATA" if not ts else ("FAIL" if gs or latest < expected-step else "PASS"))
+              if error:
+                  status = "ERROR"
+              elif not ts:
+                  status = "NO_DATA"
+              elif not history_boundary_reached:
+                  status = "INCOMPLETE_HISTORY"
+              elif gs or latest < expected-step:
+                  status = "FAIL"
+              else:
+                  status = "PASS"
               report.append({
                   "symbol":sym, "catalog_contract":next(x[1] for x in symbols if x[0]==sym),
                   "contract":contract or "", "timeframe":tf, "api_interval":interval,
                   "contract_valid":bool(contract), "candles":len(ts),
+                  "history_boundary_reached":bool(history_boundary_reached), "history_pages":history_pages,
                   "first_utc":datetime.datetime.fromtimestamp(ts[0],datetime.timezone.utc).isoformat() if ts else "",
                   "last_utc":datetime.datetime.fromtimestamp(latest,datetime.timezone.utc).isoformat() if latest else "",
                   "expected_latest_utc":datetime.datetime.fromtimestamp(expected,datetime.timezone.utc).isoformat(),
@@ -173,43 +186,46 @@ jobs:
               contract = resolved[sym]
               if not contract:
                   for tf, interval, step in [("1H","1h",3600),("2H","1h-paired",7200),("4H","4h",14400),("8H","8h",28800),("D","1d",86400)]:
-                      add(sym, "", tf, interval, step, [], "No exact Gate USDT futures contract match")
+                      add(sym, "", tf, interval, step, [], error="No exact Gate USDT futures contract match")
                   continue
               h1 = None
               try:
-                  h1, _ = get_series(contract, "1h", 3600)
-                  add(sym, contract, "1H", "1h", 3600, h1)
+                  h1, h1_boundary, h1_pages = get_series(contract, "1h", 3600)
+                  add(sym, contract, "1H", "1h", 3600, h1, h1_boundary, h1_pages)
               except Exception as e:
-                  add(sym, contract, "1H", "1h", 3600, [], e)
+                  add(sym, contract, "1H", "1h", 3600, [], error=e)
               if h1 is None:
-                  add(sym, contract, "2H", "1h-paired", 7200, [], "Cannot aggregate: 1H source request failed")
+                  add(sym, contract, "2H", "1h-paired", 7200, [], error="Cannot aggregate: 1H source request failed")
               else:
-                  add(sym, contract, "2H", "1h-paired", 7200, aggregate_2h(h1))
+                  add(sym, contract, "2H", "1h-paired", 7200, aggregate_2h(h1), h1_boundary, h1_pages)
               for tf, interval, step in [("4H","4h",14400),("8H","8h",28800),("D","1d",86400)]:
                   try:
-                      ts, _ = get_series(contract, interval, step)
-                      add(sym, contract, tf, interval, step, ts)
+                      ts, boundary_reached, history_pages = get_series(contract, interval, step)
+                      add(sym, contract, tf, interval, step, ts, boundary_reached, history_pages)
                   except Exception as e:
-                      add(sym, contract, tf, interval, step, [], e)
+                      add(sym, contract, tf, interval, step, [], error=e)
 
           out = Path("v8-kline-audit")
           out.mkdir(exist_ok=True)
-          fields = ["symbol","catalog_contract","contract","timeframe","api_interval","contract_valid","candles","first_utc","last_utc","expected_latest_utc","latest_lag_bars","gap_count","gap_examples","status","error"]
+          fields = ["symbol","catalog_contract","contract","timeframe","api_interval","contract_valid","candles","history_boundary_reached","history_pages","first_utc","last_utc","expected_latest_utc","latest_lag_bars","gap_count","gap_examples","status","error"]
           with (out/"report.csv").open("w", newline="") as f:
               w = csv.DictWriter(f, fieldnames=fields)
               w.writeheader()
               w.writerows(report)
           (out/"report.json").write_text(json.dumps({"generated_utc":datetime.datetime.now(datetime.timezone.utc).isoformat(),"symbols":len(symbols),"checks":len(report),"results":report},indent=2))
-          counts = {k:sum(x["status"]==k for x in report) for k in ("PASS","FAIL","NO_DATA","ERROR")}
+          counts = {k:sum(x["status"]==k for x in report) for k in ("PASS","FAIL","INCOMPLETE_HISTORY","NO_DATA","ERROR")}
           if len(report) != 110:
               raise SystemExit(f"Audit incomplete: expected 110 rows, got {len(report)}")
           summary = "## V8 K-line audit (V8 controller pagination parity)\n\n"
-          summary += f"- Instruments: {sum(valid.values())}/22 exact Gate contracts\n- Checks: {len(report)}/110\n"
+          summary += f"- Instruments: {sum(valid.values())}/22 exact Gate contracts\n- Full-history boundaries confirmed: {sum(bool(x['history_boundary_reached']) for x in report)}/110 checks\n- Checks: {len(report)}/110\n"
           summary += "".join(f"- {k}: {v}\n" for k,v in counts.items())
-          summary += "\n| Symbol | Gate contract | TF | Candles | Gaps | Lag bars | Status |\n|---|---|---:|---:|---:|---:|---|\n"
-          summary += "".join(f"| {x['symbol']} | {x['contract']} | {x['timeframe']} | {x['candles']} | {x['gap_count']} | {x['latest_lag_bars']} | {x['status']} |\n" for x in report)
+          summary += "\n| Symbol | Gate contract | TF | Candles | Boundary | Pages | Gaps | Lag bars | Status |\n|---|---|---:|---:|---|---:|---:|---:|---|\n"
+          summary += "".join(f"| {x['symbol']} | {x['contract']} | {x['timeframe']} | {x['candles']} | {x['history_boundary_reached']} | {x['history_pages']} | {x['gap_count']} | {x['latest_lag_bars']} | {x['status']} |\n" for x in report)
           Path(os.environ["GITHUB_STEP_SUMMARY"]).write_text(summary)
           print(summary)
+          bad = [x for x in report if x["status"] != "PASS"]
+          if bad:
+              raise SystemExit(f"Full-history audit found {len(bad)} non-PASS rows.")
           PY
           python /tmp/audit.py
       - name: Upload full audit report
