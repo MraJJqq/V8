@@ -13,6 +13,7 @@
 - `signals`：正式信号记录数组。
 - `started_at` / `finished_at`：扫描起止时间。
 - `scan_timeframes`：使用的周期列表。
+- `scan_context`：可选扫描身份元数据，包含时段/手动运行 ID；由 Bark 用于按本次扫描幂等推送。
 
 ## 正式信号记录字段
 

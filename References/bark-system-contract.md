@@ -15,7 +15,7 @@ V12 complete scan -> V12 public-signals.json -> publish to MraJJqq/Bark -> Bark 
 
 - Scheduled slots are Beijing time 08:00, 10:00, 16:00, 20:00 and 22:00.
 - Every scheduled slot is independent, even when signal content is identical.
-- Manual scans use their unique GitHub run ID and attempt.
+- Manual scans use their unique GitHub run ID.
 - Duplicate processing of the same slot is suppressed.
 
 ## State handling
@@ -24,4 +24,4 @@ Bark persists the send intent before contacting the Bark API. HTTP 429 uses boun
 
 ## Secrets
 
-BARK_DEVICE_KEY exists only in Bark repository Actions secrets. BARK_REPO_TOKEN exists only in V12 repository Actions secrets and is used to publish the public snapshot into Bark. Neither secret belongs in Media or V8.
+BARK_DEVICE_KEY exists only in Bark repository Actions secrets. SIGNAL_RELAY_TOKEN exists only in V12 repository Actions secrets and is used to publish the public snapshot into Bark. Neither secret belongs in Media or V8.
