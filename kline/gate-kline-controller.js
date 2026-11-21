@@ -9,12 +9,15 @@ export function findCandleGaps(rows,tf){
  const step=MS[tf]/1000;if(!step||!Array.isArray(rows))throw new TypeError("Unsupported timeframe or candle rows");
  const gaps=[];for(let i=1;i<rows.length;i++){const previous=rows[i-1].t,current=rows[i].t,delta=current-previous,misaligned=previous%step!==0||current%step!==0||delta%step!==0;if(delta>step||misaligned)gaps.push({from:previous+step,to:current-step,missingCount:Math.max(0,Math.floor(delta/step)-1),misaligned})}return gaps;
 }
+export function expectedLatestCandleTimestamp(tf,now=Date.now(),graceMs=120000){
+ const stepMs=MS[tf];if(!stepMs)throw new TypeError("Unsupported timeframe");
+ const bucket=Math.floor(now/stepMs)*stepMs,withinBucket=now-bucket;
+ return (bucket-stepMs-(withinBucket<Math.min(graceMs,stepMs/10)?stepMs:0))/1000;
+}
 export function hasLatestCoverage(rows,tf,now=Date.now(),graceMs=120000){
  const stepMs=MS[tf];if(!stepMs||!Array.isArray(rows)||!rows.length)return false;
  const step=stepMs/1000;if(rows.some(row=>!Number.isFinite(row.t)||row.t%step!==0)||findCandleGaps(rows,tf).length)return false;
- const bucket=Math.floor(now/stepMs)*stepMs,withinBucket=now-bucket;
- const expected=bucket-stepMs-(withinBucket<Math.min(graceMs,stepMs/10)?stepMs:0);
- return rows[rows.length-1].t>=expected/1000;
+ return rows[rows.length-1].t>=expectedLatestCandleTimestamp(tf,now,graceMs);
 }
 export function historyRetryDelay(attempt){return Math.min(300000,30000*2**Math.min(Math.max(0,Number(attempt)||0),4));}
 const keyOf=(contract,tf)=>"gate-usdt:"+contract+":"+tf;
@@ -208,7 +211,7 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
   let rows=source,guard=0;const key=keyOf(c,tf);
   while(canWork()&&guard++<10000){
    const gap=findCandleGaps(rows,tf)[0];
-   if(!gap)return rows;
+   if(!gap)break;
    if(gap.misaligned||gap.missingCount<1)throw new Error("Gate history contains misaligned candle timestamps");
    const added=await range(c,tf,gap.from,gap.to);
    if(!canWork())return rows;
@@ -218,6 +221,19 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
    if(isActive(c,tf)){candles=rows;complete=false;render(rows,selection,tf)}
   }
   if(guard>=10000)throw new Error("Gate history gap repair limit reached");
+  if(!canWork())return rows;
+  if(rows.length){
+   const step=MS[tf]/1000,expected=expectedLatestCandleTimestamp(tf),last=rows[rows.length-1].t;
+   if(last<expected){
+    const from=last+step,to=expected+step-1;
+    const added=await range(c,tf,from,to);
+    if(!canWork())return rows;
+    const next=merge(rows,added);
+    if(next.length===rows.length||next[next.length-1].t<expected)throw new Error("Gate latest candle gap could not be filled");
+    rows=next;await write(key,rows,false,"latest-tail-repaired");
+    if(isActive(c,tf)){candles=rows;complete=false;render(candles,selection,tf)}
+   }
+  }
   return rows
  }
  function sendSubscription(event,sub){if(!ws||ws.readyState!==WebSocket.OPEN||!sub)return;ws.send(JSON.stringify({time:Math.floor(Date.now()/1000),channel:"futures.candlesticks",event,payload:[INTERVALS[sub.timeframe],sub.contract]}))}

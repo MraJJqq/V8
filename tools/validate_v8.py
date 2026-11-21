@@ -123,8 +123,10 @@ if "latest-verified" not in controller:
     fail("successful gap repair does not mark the series verified")
 if "restoreRepairTasks" not in controller or 'getAll()' not in controller or "repair-tasks-restored" not in controller:
     fail("persisted repair tasks are not restored after controller restart")
-if "hasLatestCoverage" not in controller or "findCandleGaps" not in controller:
+if "hasLatestCoverage" not in controller or "findCandleGaps" not in controller or "expectedLatestCandleTimestamp" not in controller:
     fail("latest-tail or aligned historical gap verification is missing")
+if "Gate latest candle gap could not be filled" not in controller or "latest-tail-repaired" not in controller:
+    fail("latest-tail gap is detected but not repaired through the exchange range endpoint")
 if "historyRetryDelay" not in controller or "retryDueAt" not in controller:
     fail("persisted retry backoff state is missing")
 if 'DB_NAME="vegas-v6-market-cache"' not in controller:

@@ -5,7 +5,7 @@ import "fake-indexeddb/auto";
 
 const source = await readFile(new URL("../kline/gate-kline-controller.js", import.meta.url), "utf8");
 const moduleUrl = "data:text/javascript;base64," + Buffer.from(source).toString("base64");
-const { aggregate2H, createGateKlineController, findCandleGaps, hasLatestCoverage, historyRetryDelay } = await import(moduleUrl);
+const { aggregate2H, createGateKlineController, expectedLatestCandleTimestamp, findCandleGaps, hasLatestCoverage, historyRetryDelay } = await import(moduleUrl);
 const hour = 3600;
 const candle = (t, close = 100) => ({ t, o: close, h: close + 2, l: close - 2, c: close + 1 });
 const utc = value => Math.floor(Date.parse(value) / 1000);
@@ -55,6 +55,14 @@ test("rejects off-grid and non-integral candle timestamps", () => {
   assert.equal(hasLatestCoverage(rows, "1H", 2 * hour + 5 * 60 * 1000), false);
 });
 
+test("computes the exact latest required timestamp for all five timeframes", () => {
+  const now = Date.parse("2026-11-21T14:05:00Z");
+  for (const [tf, step] of [["1H", 3600], ["2H", 7200], ["4H", 14400], ["8H", 28800], ["D", 86400]]) {
+    const expected = Math.floor(Math.floor(now / 1000) / step) * step - step;
+    assert.equal(expectedLatestCandleTimestamp(tf, now), expected, tf);
+  }
+});
+
 test("checks latest closed-candle coverage across all five timeframes", () => {
   const now = Date.parse("2026-11-21T14:05:00Z");
   for (const [tf, step] of [["1H", 3600], ["2H", 7200], ["4H", 14400], ["8H", 28800], ["D", 86400]]) {
@@ -97,7 +105,7 @@ test("retry backoff grows exponentially and caps at five minutes", () => {
 test("controller repairs a real latest-end gap and persists verified candles", async () => {
   const contract = "SIM_REPAIR_USDT", key = "gate-usdt:" + contract + ":1H";
   const current = Math.floor(Date.now() / 3600000) * 3600;
-  const missing = candle(current - hour), latestRows = [candle(current - 2 * hour), candle(current)];
+  const missing = candle(current - hour), latestRows = [candle(current - 3 * hour), candle(current - 2 * hour)];
   const oldFetch = globalThis.fetch;
   globalThis.fetch = async input => {
     const url = new URL(String(input));
@@ -114,6 +122,33 @@ test("controller repairs a real latest-end gap and persists verified candles", a
     assert.equal(meta.candleCount, 3);
   } finally {
     waiting.controller.destroy();
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("controller retries transient Gate 429 and 5xx responses before accepting fresh candles", async () => {
+  const contract = "SIM_RETRY_USDT";
+  const current = Math.floor(Date.now() / 3600000) * 3600;
+  const rows = [candle(current - 2 * hour), candle(current - hour), candle(current)];
+  const oldFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    if (calls === 1) return { ok: false, status: 429, json: async () => [] };
+    if (calls === 2) return { ok: false, status: 503, json: async () => [] };
+    return response(rows);
+  };
+  let resolveRepaired;
+  const repairedPromise = new Promise(resolve => { resolveRepaired = resolve; });
+  const controller = createGateKlineController({ instruments: [], isHidden: () => false, onState: state => {
+    if (state.status === "latest-gap-repaired") resolveRepaired(state);
+  }});
+  try {
+    await controller.select("SIM_RETRY", contract, "1H");
+    await wait(repairedPromise, 20000);
+    assert.equal(calls, 3);
+  } finally {
+    controller.destroy();
     globalThis.fetch = oldFetch;
   }
 });
