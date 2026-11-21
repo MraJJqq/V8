@@ -115,14 +115,14 @@ Operating flow:
 
 Supported intervals in this system are `1H`, `2H`, `4H`, `8H`, and `D`. Data source is Gate USDT perpetual futures.
 
-## V12 signal feed and bottom ticker
+## Bark-hosted V12 signal feed and bottom ticker
 
 Sources:
 - `modules/signal-ticker/v12-feed.js`
 - `modules/signal-ticker/ticker.js`
 
 Operating flow:
-1. Read `https://raw.githubusercontent.com/MraJJqq/v12/main/v12/public-signals.json`.
+1. Read `https://raw.githubusercontent.com/MraJJqq/Bark/main/public-signals.json`. V12 remains the scan and signal-generation source; its complete snapshot is published into the independent Bark repository.
 2. Cache a successful payload for 30 seconds; requests have a 10-second timeout and are skipped while the page is hidden.
 3. Validate source name, schema version, current Beijing signal day, completed full-pool scan status, and exact 22-symbol universe.
 4. The ticker accepts only a complete valid V12 payload. Formal signals are matched against the V6 contract universe and rendered into their instrument groups.
