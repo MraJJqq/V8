@@ -115,7 +115,7 @@ if "modules/logo/host.css" in index_source:
 
 controller = (ROOT / "kline/gate-kline-controller.js").read_text(encoding="utf-8")
 latest_write = controller.find('await write(key,merged,cached.historyBoundaryReached===true,"latest-data-updated")')
-latest_ema = controller.find("await updateLatestEma(key,merged,await getDB())")
+latest_ema = controller.find("await updateEmaCache(key,merged)")
 gap_repair = controller.find("const repaired=await repairGaps(c,tf,merged)")
 if min(latest_write, latest_ema, gap_repair) < 0 or not (latest_write < latest_ema < gap_repair):
     fail("latest candles and EMA must be persisted before independent historical gap repair")
