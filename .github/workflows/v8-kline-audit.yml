@@ -13,18 +13,18 @@ permissions:
 jobs:
   audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Audit all instruments and timeframes against Gate
+      - name: Audit all instruments and timeframes using V8 controller rules
         env:
           GITHUB_STEP_SUMMARY: ${{ github.step_summary }}
         run: |
           cat > /tmp/audit.py <<'PY'
-          import csv, json, re, time, datetime, urllib.request, urllib.parse
+          import csv, json, math, os, re, time, datetime, urllib.request, urllib.parse, urllib.error
           from pathlib import Path
 
           catalog = Path("modules/shared/instrument-catalog.js").read_text()
@@ -35,115 +35,180 @@ jobs:
           base = "https://api.gateio.ws/api/v4/futures/usdt"
           now = int(time.time())
           start = now - 365 * 86400
+          PAGE = 2000
           report = []
-          contract_req = urllib.request.Request(base + "/contracts", headers={"Accept":"application/json","User-Agent":"V8-read-only-kline-audit/1.0"})
+
+          def api(params):
+              url = base + "/candlesticks?" + urllib.parse.urlencode(params)
+              req = urllib.request.Request(url, headers={"Accept":"application/json","User-Agent":"V8-read-only-kline-audit/2.0"})
+              last_error = None
+              for attempt in range(4):
+                  try:
+                      with urllib.request.urlopen(req, timeout=30) as r:
+                          body = json.load(r)
+                      if not isinstance(body, list):
+                          raise RuntimeError("Gate returned non-array candlesticks")
+                      return body
+                  except urllib.error.HTTPError as e:
+                      detail = e.read().decode("utf-8", "replace")[:400]
+                      last_error = RuntimeError(f"Gate HTTP {e.code}: {detail}")
+                      if e.code not in (429, 500, 502, 503, 504) or attempt == 3:
+                          raise last_error
+                  except (TimeoutError, urllib.error.URLError) as e:
+                      last_error = e
+                      if attempt == 3:
+                          raise
+                  time.sleep(min(8, 2 ** attempt))
+              raise last_error or RuntimeError("Gate request failed")
+
+          contract_req = urllib.request.Request(base + "/contracts", headers={"Accept":"application/json","User-Agent":"V8-read-only-kline-audit/2.0"})
           with urllib.request.urlopen(contract_req, timeout=30) as r:
               contracts = json.load(r)
           known = {str(x.get("name","")).upper(): x for x in contracts if isinstance(x, dict)}
+
           def resolve_gate_contract(symbol, catalog_contract):
-              # V8 catalog stores compact display IDs (e.g. BTCUSDT); Gate API
-              # futures contract IDs use an underscore before settlement (BTC_USDT).
               compact = str(catalog_contract or "").upper().replace("-", "_")
               candidates = [compact]
               if compact.endswith("USDT"):
                   candidates.append(compact[:-4] + "_USDT")
               candidates.append(str(symbol).upper() + "_USDT")
-              for candidate in candidates:
-                  if candidate in known:
-                      return candidate
-              return None
+              return next((x for x in candidates if x in known), None)
+
           resolved = {sym: resolve_gate_contract(sym, contract) for sym, contract in symbols}
           valid = {sym: resolved[sym] is not None for sym, _ in symbols}
           if not any(valid.values()):
-              raise SystemExit("No catalog entries resolved to Gate USDT futures contracts; refusing to publish an all-zero audit.")
+              raise SystemExit("No catalog entries resolved to Gate USDT futures contracts.")
 
-          def get_candles(contract, interval, step):
-              # Match V8 range pagination: bounded from/to windows, no oversized limit.
-              rows, cursor = [], start
-              while cursor <= now:
-                  end = min(now, cursor + 1999 * step)
-                  params = urllib.parse.urlencode({"contract":contract,"interval":interval,"from":cursor,"to":end})
-                  req = urllib.request.Request(base + "/candlesticks?" + params, headers={"Accept":"application/json","User-Agent":"V8-read-only-kline-audit/1.0"})
-                  try:
-                      with urllib.request.urlopen(req, timeout=30) as r:
-                          batch = json.load(r)
-                  except urllib.error.HTTPError as e:
-                      detail = e.read().decode("utf-8", "replace")[:500]
-                      raise RuntimeError(f"Gate HTTP {e.code}: {detail}") from e
-                  if not isinstance(batch, list):
-                      raise RuntimeError("unexpected API payload")
-                  if not batch:
+          def valid_candle(item):
+              try:
+                  t = int(item.get("t", 0))
+                  o, h, l, c = (float(item[k]) for k in ("o","h","l","c"))
+                  return t > 0 and all(math.isfinite(v) and v > 0 for v in (o,h,l,c)) and h >= max(o,c) and l <= min(o,c) and h >= l
+              except (TypeError, ValueError, KeyError, AttributeError):
+                  return False
+
+          def get_series(contract, interval, step):
+              # Same direction as V8 latest(): get newest page first, then page backward.
+              newest = api({"contract":contract, "interval":interval, "limit":PAGE})
+              rows = [int(x["t"]) for x in newest if valid_candle(x)]
+              rows = sorted(set(rows))
+              if not rows:
+                  return [], "latest endpoint returned no valid candles"
+              cursor = rows[0]
+              pages = 0
+              while cursor > start:
+                  older_from = max(start, cursor - PAGE * step)
+                  older_to = cursor - 1
+                  if older_to <= older_from:
                       break
-                  parsed = [int(item.get("t", 0)) for item in batch if int(item.get("t", 0)) > 0]
-                  if not parsed:
-                      break
-                  rows.extend(parsed)
-                  nxt = max(parsed) + step
-                  if nxt <= cursor:
-                      raise RuntimeError("Gate pagination stalled")
-                  cursor = nxt
+                  batch = api({"contract":contract, "interval":interval, "from":older_from, "to":older_to})
+                  parsed = sorted(set(int(x["t"]) for x in batch if valid_candle(x)))
                   time.sleep(0.12)
-              return sorted(set(rows))
+                  if not parsed:
+                      # No older history is a natural listing/history boundary, not a reason to discard newest data.
+                      break
+                  older = [t for t in parsed if t < cursor]
+                  if not older:
+                      raise RuntimeError("Backward pagination stalled: API did not return older timestamps")
+                  rows = sorted(set(rows).union(older))
+                  next_cursor = min(older)
+                  if next_cursor >= cursor:
+                      raise RuntimeError("Backward pagination did not move")
+                  cursor = next_cursor
+                  pages += 1
+                  if pages > 20:
+                      raise RuntimeError("Backward pagination exceeded safety limit")
+              return rows, "ok"
 
           def gaps(ts, step):
-              return [(ts[i-1], ts[i], max(0,(ts[i]-ts[i-1])//step-1)) for i in range(1,len(ts)) if ts[i]-ts[i-1] != step or ts[i-1] % step or ts[i] % step]
+              out = []
+              for i in range(1, len(ts)):
+                  prev, cur = ts[i-1], ts[i]
+                  delta = cur - prev
+                  misaligned = (prev % step != 0 or cur % step != 0 or delta % step != 0)
+                  if delta > step or misaligned:
+                      out.append((prev + step, cur - step, max(0, delta // step - 1), misaligned))
+              return out
 
-          def add(sym, contract, tf, interval, step, ts):
-              gs = gaps(ts, step)
-              step_ms = step * 1000
-              bucket_ms = (now * 1000 // step_ms) * step_ms
-              within_bucket_ms = now * 1000 - bucket_ms
-              expected = (bucket_ms - step_ms - (step_ms if within_bucket_ms < min(120000, step_ms / 10) else 0)) // 1000
+          def expected_latest(tf_step):
+              step_ms = tf_step * 1000
+              bucket = (now * 1000 // step_ms) * step_ms
+              within = now * 1000 - bucket
+              return (bucket - step_ms - (step_ms if within < min(120000, step_ms / 10) else 0)) // 1000
+
+          def add(sym, contract, tf, interval, step, ts, error=None):
+              gs = gaps(ts, step) if ts else []
+              expected = expected_latest(step)
               latest = ts[-1] if ts else None
+              lag = ((expected-latest)//step if latest is not None and expected > latest else 0) if latest is not None else ""
+              status = "ERROR" if error else ("NO_DATA" if not ts else ("FAIL" if gs or latest < expected-step else "PASS"))
               report.append({
-                  "symbol":sym,"catalog_contract":next((x[1] for x in symbols if x[0]==sym),""),"contract":contract,"timeframe":tf,"api_interval":interval,
-                  "contract_valid":valid[sym],"candles":len(ts),
+                  "symbol":sym, "catalog_contract":next(x[1] for x in symbols if x[0]==sym),
+                  "contract":contract or "", "timeframe":tf, "api_interval":interval,
+                  "contract_valid":bool(contract), "candles":len(ts),
                   "first_utc":datetime.datetime.fromtimestamp(ts[0],datetime.timezone.utc).isoformat() if ts else "",
                   "last_utc":datetime.datetime.fromtimestamp(latest,datetime.timezone.utc).isoformat() if latest else "",
                   "expected_latest_utc":datetime.datetime.fromtimestamp(expected,datetime.timezone.utc).isoformat(),
-                  "latest_lag_bars":((expected-latest)//step if latest is not None and expected>latest else 0) if latest is not None else "",
-                  "gap_count":len(gs),"gap_examples":json.dumps(gs[:5]),
-                  "status":"FAIL" if not valid[sym] or not ts or gs or latest is None or latest < expected-step else "PASS"
+                  "latest_lag_bars":lag, "gap_count":len(gs), "gap_examples":json.dumps(gs[:5]),
+                  "status":status, "error":str(error)[:400] if error else ""
               })
+
+          def aggregate_2h(rows):
+              groups = {}
+              for t in sorted(set(rows)):
+                  bucket = (t // 7200) * 7200
+                  groups.setdefault(bucket, []).append(t)
+              current_hour = (now // 3600) * 3600
+              current_bucket = (current_hour // 7200) * 7200
+              out = []
+              for bucket, items in groups.items():
+                  items.sort()
+                  if len(items)==2 and items[0]==bucket and items[1]==bucket+3600 and (bucket+7200<=current_hour or (bucket==current_bucket and items[1]==current_hour)):
+                      out.append(bucket)
+                  elif len(items)==1 and bucket==current_bucket and items[0]==current_hour:
+                      out.append(bucket)
+              return sorted(out)
 
           for sym, catalog_contract in symbols:
               contract = resolved[sym]
               if not contract:
-                  for tf, interval, step in [("1H","1h",3600),("2H","2h",7200),("4H","4h",14400),("8H","8h",28800),("1D","1d",86400)]:
-                      report.append({"symbol":sym,"catalog_contract":catalog_contract,"contract":"","timeframe":tf,"contract_valid":False,"candles":0,"gap_count":"","gap_examples":"","status":"INVALID_CONTRACT","error":"No exact Gate USDT futures contract match"})
+                  for tf, interval, step in [("1H","1h",3600),("2H","1h-paired",7200),("4H","4h",14400),("8H","8h",28800),("D","1d",86400)]:
+                      add(sym, "", tf, interval, step, [], "No exact Gate USDT futures contract match")
                   continue
+              h1 = None
               try:
-                  h1 = get_candles(contract,"1h",3600)
-                  add(sym,contract,"1H","1h",3600,h1)
-                  # Match the V8 construction: a 2H candle exists only for a complete, aligned pair of 1H candles.
-                  h2 = []
-                  by_t = set(h1)
-                  for t in h1:
-                      if t % 7200 == 0 and t+3600 in by_t and t+7200 <= now:
-                          h2.append(t)
-                  add(sym,contract,"2H","1h-paired",7200,sorted(set(h2)))
-                  for tf, interval, step in [("4H","4h",14400),("8H","8h",28800),("1D","1d",86400)]:
-                      add(sym,contract,tf,interval,step,get_candles(contract,interval,step))
+                  h1, _ = get_series(contract, "1h", 3600)
+                  add(sym, contract, "1H", "1h", 3600, h1)
               except Exception as e:
-                  for tf in ("1H","2H","4H","8H","1D"):
-                      if not any(x["symbol"]==sym and x["timeframe"]==tf for x in report):
-                          report.append({"symbol":sym,"contract":contract,"timeframe":tf,"status":"ERROR","error":str(e)[:300],"candles":0,"gap_count":"","gap_examples":""})
-                  time.sleep(1)
+                  add(sym, contract, "1H", "1h", 3600, [], e)
+              if h1 is None:
+                  add(sym, contract, "2H", "1h-paired", 7200, [], "Cannot aggregate: 1H source request failed")
+              else:
+                  add(sym, contract, "2H", "1h-paired", 7200, aggregate_2h(h1))
+              for tf, interval, step in [("4H","4h",14400),("8H","8h",28800),("D","1d",86400)]:
+                  try:
+                      ts, _ = get_series(contract, interval, step)
+                      add(sym, contract, tf, interval, step, ts)
+                  except Exception as e:
+                      add(sym, contract, tf, interval, step, [], e)
 
           out = Path("v8-kline-audit")
           out.mkdir(exist_ok=True)
-          with (out/"report.csv").open("w",newline="") as f:
-              w=csv.DictWriter(f,fieldnames=sorted({k for x in report for k in x}))
-              w.writeheader(); w.writerows(report)
+          fields = ["symbol","catalog_contract","contract","timeframe","api_interval","contract_valid","candles","first_utc","last_utc","expected_latest_utc","latest_lag_bars","gap_count","gap_examples","status","error"]
+          with (out/"report.csv").open("w", newline="") as f:
+              w = csv.DictWriter(f, fieldnames=fields)
+              w.writeheader()
+              w.writerows(report)
           (out/"report.json").write_text(json.dumps({"generated_utc":datetime.datetime.now(datetime.timezone.utc).isoformat(),"symbols":len(symbols),"checks":len(report),"results":report},indent=2))
-          passed=sum(x.get("status")=="PASS" for x in report)
-          failed=sum(x.get("status")=="FAIL" for x in report)
-          errors=sum(x.get("status")=="ERROR" for x in report)
-          invalid=sum(x.get("status")=="INVALID_CONTRACT" for x in report)
-          summary=f"## V8 K-line audit\n\n- Instruments: {sum(valid.values())}/22 resolved to Gate contracts\n- Checks: {len(report)}/110\n- PASS: {passed}\n- FAIL: {failed}\n- INVALID CONTRACT: {invalid}\n- ERROR: {errors}\n\n| Symbol | Gate contract | Timeframe | Candles | Gaps | Latest lag (bars) | Status |\n|---|---|---|---:|---:|---:|---|\n"
-          summary += "".join(f"| {x['symbol']} | {x.get('contract','')} | {x['timeframe']} | {x.get('candles','')} | {x.get('gap_count','')} | {x.get('latest_lag_bars','')} | {x.get('status')} |\n" for x in report)
-          Path("/tmp/summary.md").write_text(summary)
-          Path(__import__("os").environ["GITHUB_STEP_SUMMARY"]).write_text(summary)
+          counts = {k:sum(x["status"]==k for x in report) for k in ("PASS","FAIL","NO_DATA","ERROR")}
+          if len(report) != 110:
+              raise SystemExit(f"Audit incomplete: expected 110 rows, got {len(report)}")
+          summary = "## V8 K-line audit (V8 controller pagination parity)\n\n"
+          summary += f"- Instruments: {sum(valid.values())}/22 exact Gate contracts\n- Checks: {len(report)}/110\n"
+          summary += "".join(f"- {k}: {v}\n" for k,v in counts.items())
+          summary += "\n| Symbol | Gate contract | TF | Candles | Gaps | Lag bars | Status |\n|---|---|---:|---:|---:|---:|---|\n"
+          summary += "".join(f"| {x['symbol']} | {x['contract']} | {x['timeframe']} | {x['candles']} | {x['gap_count']} | {x['latest_lag_bars']} | {x['status']} |\n" for x in report)
+          Path(os.environ["GITHUB_STEP_SUMMARY"]).write_text(summary)
           print(summary)
           PY
           python /tmp/audit.py
