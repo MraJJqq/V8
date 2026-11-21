@@ -229,6 +229,9 @@ jobs:
         with:
           path: .
 
+      - name: Allow Pages artifact metadata to settle
+        run: sleep 15
+
       - name: Deploy V8 website
         id: deployment
         uses: actions/deploy-pages@v4
