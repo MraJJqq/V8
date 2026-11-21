@@ -17,7 +17,7 @@ VEGAS V8 is rebuilt from the Media library's complete seven-system website packa
 - K线与卡片行情：Gate USDT 永续合约。
 - 正式信号：V12 公共信号 JSON；V8 使用 Media 定义的 22 品种本地池。
 - 22 个启用品种 Logo、字体、图标、CSS、模块和页面资源均在本仓库本地保存。
-- 背景原始素材保留在 `Backgrounds/`；网页实际使用的背景副本位于 `assets/backgrounds/`。
+- 背景原始素材统一保留在 Media `Backgrounds/`；未被页面引用的背景不复制进 V8 运行目录。
 - 五个周期共用同一套视窗状态，不拆分为各周期独立视窗。
 
 ## 目录
