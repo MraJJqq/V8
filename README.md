@@ -14,7 +14,7 @@ VEGAS V8 is rebuilt from the Media library's complete six-system website package
 ## 数据与资源边界
 
 - K线与卡片行情：Gate USDT 永续合约。
-          - 22 个启用品种 Logo、字体、图标、CSS、模块和页面资源均在本仓库本地保存。
+- 22 个启用品种 Logo、字体、图标、CSS、模块和页面资源均在本仓库本地保存。
 - `Backgrounds/` 完整素材目录从锁定的 Media 提交同步；网页只通过实际引用路径加载背景。
 - 五个周期共用同一套视窗状态，不拆分为各周期独立视窗。
 
