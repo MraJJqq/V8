@@ -129,6 +129,10 @@ if "Gate latest candle gap could not be filled" not in controller or "latest-tai
     fail("latest-tail gap is detected but not repaired through the exchange range endpoint")
 if "historyRetryDelay" not in controller or "retryDueAt" not in controller:
     fail("persisted retry backoff state is missing")
+if "GATE_REQUEST_TIMEOUT_MS" not in controller or "gate-request-timeout" not in controller:
+    fail("Gate candle requests are missing bounded timeout and timeout retry handling")
+if "pending.finally" not in controller or "resumeTimeframe" not in controller:
+    fail("page resume does not wait for an aborted latest request before restarting")
 if 'DB_NAME="vegas-v6-market-cache"' not in controller:
     fail("Gate IndexedDB namespace is not V6-isolated")
 

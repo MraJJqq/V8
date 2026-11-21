@@ -4,6 +4,7 @@ let storageCheckAt=0;
 const INTERVALS=Object.freeze({"1H":"1h","2H":"1h","4H":"4h","8H":"8h","D":"1d"});
 const TIMEFRAMES=Object.freeze(["1H","2H","4H","8H","D"]);
 const MS=Object.freeze({"1H":3600000,"2H":7200000,"4H":14400000,"8H":28800000,"D":86400000});
+export const GATE_REQUEST_TIMEOUT_MS=15000;
 const PAGE=2000,API="https://api.gateio.ws/api/v4/futures/usdt",WS_URL="wss://fx-ws.gateio.ws/v4/ws/usdt";
 export function findCandleGaps(rows,tf){
  const step=MS[tf]/1000;if(!step||!Array.isArray(rows))throw new TypeError("Unsupported timeframe or candle rows");
@@ -112,7 +113,7 @@ async function updateLatestEma(key,rows,db){
   tx.onerror=()=>{if(!needsFull)fail(tx.error)};
  });
 }
-export function createGateKlineController({frame,instruments=[],onState=()=>{},isHidden=()=>document.hidden}={}){
+export function createGateKlineController({frame,instruments=[],onState=()=>{},isHidden=()=>document.hidden,requestTimeoutMs=GATE_REQUEST_TIMEOUT_MS}={}){
  let dbp=null,dbRetryAt=0,lastPongAt=0,wsWatchdogTimer=0;
  const memoryCache=new Map(),memoryCacheIncomplete=new Set(),bySymbol=new Map(instruments.map(x=>[x.symbol,x])),memory=new Map();
  async function getDB(){
@@ -199,7 +200,34 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
  } function scheduleWrite(key,rows,done,status="ok",error=null){pendingWrites.set(key,{rows:rows.slice(),done,status,error});if(!writeTimer)writeTimer=setTimeout(()=>{void flushPendingWrites()},750)}
  async function flushPendingWrites(){if(writeTimer){clearTimeout(writeTimer);writeTimer=0}const jobs=[...pendingWrites.entries()];pendingWrites.clear();await Promise.all(jobs.map(async([key,p])=>{try{await write(key,p.rows,p.done,p.status,p.error,true);const snapshot=await read(key);await updateLatestEma(key,snapshot.candles,await getDB())}catch(error){onState({status:"cache-write-failed",key,error:String(error?.message||error)})}}))}
  function mergeLive(rows,incoming){for(const item of incoming){const last=rows[rows.length-1];if(!last||item.t>last.t){rows.push(item);continue}if(item.t===last.t){rows[rows.length-1]=item;continue}const index=rows.findIndex(row=>row.t===item.t);if(index>=0)rows[index]=item;else{rows.push(item);rows.sort((a,b)=>a.t-b.t)}}return rows}
- async function request(url,tf){let lastError;for(let attempt=0;attempt<5;attempt++){if(!canWork())throw new Error("History request paused");const controller=new AbortController();requestControllers.add(controller);try{const res=await fetch(url,{headers:{Accept:"application/json"},cache:"no-store",signal:controller.signal});if(res.status===429||res.status>=500)throw new Error("Gate HTTP "+res.status);if(!res.ok)throw new Error("Gate HTTP "+res.status);const body=await res.json();if(!Array.isArray(body))throw new Error("Gate returned non-array candlesticks");return normalize(body,tf)}catch(error){lastError=error;if(!canWork()||controller.signal.aborted)throw error;if(attempt===4)break;await new Promise(r=>setTimeout(r,Math.min(8000,1000*2**attempt)))}finally{requestControllers.delete(controller)}}throw lastError||new Error("Gate history request failed")}
+ async function request(url,tf){
+  let lastError;
+  for(let attempt=0;attempt<5;attempt++){
+   if(!canWork())throw new Error("History request paused");
+   const controller=new AbortController();
+   requestControllers.add(controller);
+   const timeout=setTimeout(()=>controller.abort("gate-request-timeout"),Math.max(1,Number(requestTimeoutMs)||GATE_REQUEST_TIMEOUT_MS));
+   try{
+    const res=await fetch(url,{headers:{Accept:"application/json"},cache:"no-store",signal:controller.signal});
+    if(res.status===429||res.status>=500){const error=new Error("Gate HTTP "+res.status);error.retryable=true;throw error}
+    if(!res.ok)throw new Error("Gate HTTP "+res.status);
+    const body=await res.json();
+    if(!Array.isArray(body))throw new Error("Gate returned non-array candlesticks");
+    return normalize(body,tf);
+   }catch(error){
+    lastError=error;
+    const timedOut=controller.signal.aborted&&controller.signal.reason==="gate-request-timeout";
+    if(!canWork()||(controller.signal.aborted&&!timedOut))throw error;
+    const retryable=timedOut||error?.retryable===true||error instanceof TypeError;
+    if(!retryable||attempt===4)break;
+    await new Promise(r=>setTimeout(r,Math.min(8000,1000*2**attempt)));
+   }finally{
+    clearTimeout(timeout);
+    requestControllers.delete(controller);
+   }
+  }
+  throw lastError||new Error("Gate history request failed");
+ }
  async function getContracts(){if(!contractsPromise)contractsPromise=fetch(API+"/contracts",{headers:{Accept:"application/json"},cache:"no-store"}).then(async r=>{if(!r.ok)throw new Error("Gate contract list HTTP "+r.status);const rows=await r.json();if(!Array.isArray(rows))throw new Error("Gate contract list invalid");return new Map(rows.map(x=>[x.name,x]))}).catch(e=>{contractsPromise=null;throw e});return contractsPromise}
  async function assertContract(c){const all=await getContracts();if(!all.has(c))throw new Error("Gate USDT perpetual contract not found: "+c);return all.get(c)}
  async function latest(c,n,tf){if(tf==="2H"){const count=Math.min(2000,Math.max(4,n*2+2)),u=API+"/candlesticks?contract="+encodeURIComponent(c)+"&interval=1h&limit="+count;return aggregate2H(await request(u,"1H"))}const u=API+"/candlesticks?contract="+encodeURIComponent(c)+"&interval="+INTERVALS[tf]+"&limit="+n;return merge(await request(u,tf))}
@@ -403,7 +431,21 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
  }
  async function refresh(){if(stopped||!contract||!canWork())return false;return updateLatest(contract,timeframe,selection,true)}
  function suspend(){paused=true;if(historyRetryTimer){clearTimeout(historyRetryTimer);historyRetryTimer=0}for(const controller of requestControllers)controller.abort("page-hidden");closeWS();void flushPendingWrites()}
- function resume(){if(stopped||isHidden())return;paused=false;forceLatestSweep=true;if(contract)void select(symbol,contract,timeframe,true);else startHistoryQueue(true)}
+ function resume(){
+  if(stopped||isHidden())return;
+  paused=false;forceLatestSweep=true;
+  if(contract){
+   const resumeSymbol=symbol,resumeContract=contract,resumeTimeframe=timeframe;
+   const pending=latestJobs.get(keyOf(resumeContract,resumeTimeframe));
+   if(pending){
+    void pending.finally(()=>{
+     if(canWork()&&contract===resumeContract&&timeframe===resumeTimeframe)void select(resumeSymbol,resumeContract,resumeTimeframe,true);
+    });
+    return;
+   }
+   void select(resumeSymbol,resumeContract,resumeTimeframe,true);
+  }else startHistoryQueue(true);
+ }
  function destroy(){if(stopped)return;stopped=true;paused=true;if(historyRetryTimer){clearTimeout(historyRetryTimer);historyRetryTimer=0}selection++;for(const controller of requestControllers)controller.abort("controller-destroyed");closeWS();void flushPendingWrites()}
  return Object.freeze({select,refresh,resume,suspend,destroy,getContracts,get state(){return Object.freeze({symbol,contract,timeframe,count:candles.length,historyComplete:complete,historyQueue:Object.freeze({running:queueRunning,completed:completed.size,total:instruments.length*TIMEFRAMES.length,failed:Object.fromEntries(failed)})})}});
 }

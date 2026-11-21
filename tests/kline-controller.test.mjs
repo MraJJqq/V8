@@ -5,7 +5,7 @@ import "fake-indexeddb/auto";
 
 const source = await readFile(new URL("../kline/gate-kline-controller.js", import.meta.url), "utf8");
 const moduleUrl = "data:text/javascript;base64," + Buffer.from(source).toString("base64");
-const { aggregate2H, createGateKlineController, expectedLatestCandleTimestamp, findCandleGaps, hasLatestCoverage, historyRetryDelay } = await import(moduleUrl);
+const { aggregate2H, createGateKlineController, expectedLatestCandleTimestamp, findCandleGaps, GATE_REQUEST_TIMEOUT_MS, hasLatestCoverage, historyRetryDelay } = await import(moduleUrl);
 const hour = 3600;
 const candle = (t, close = 100) => ({ t, o: close, h: close + 2, l: close - 2, c: close + 1 });
 const utc = value => Math.floor(Date.parse(value) / 1000);
@@ -28,6 +28,28 @@ function wait(promise, timeoutMs = 7000) {
     promise.then(value => { clearTimeout(timer); resolve(value); }, error => { clearTimeout(timer); reject(error); });
   });
 }
+
+async function openTestDB() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open("vegas-v6-market-cache", 3);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains("candles")) db.createObjectStore("candles", { keyPath: "id" });
+      if (!db.objectStoreNames.contains("candleRows")) {
+        const rows = db.createObjectStore("candleRows", { keyPath: "id" });
+        rows.createIndex("series", "series", { unique: false });
+      }
+      if (!db.objectStoreNames.contains("seriesMeta")) db.createObjectStore("seriesMeta", { keyPath: "id" });
+      if (!db.objectStoreNames.contains("emaRows")) {
+        const ema = db.createObjectStore("emaRows", { keyPath: "id" });
+        ema.createIndex("series", "series", { unique: false });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
 function readStore(storeName, key) {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open("vegas-v6-market-cache", 3);
@@ -192,5 +214,265 @@ test("failed latest-gap repair persists and restores its task after controller r
   } finally {
     second.destroy();
     globalThis.fetch = oldFetch;
+  }
+});
+
+
+test("bounds each Gate request with an abortable timeout and retries a timed-out request", async () => {
+  assert.equal(GATE_REQUEST_TIMEOUT_MS, 15000);
+  const contract = "SIM_TIMEOUT_USDT";
+  const current = Math.floor(Date.now() / 3600000) * 3600;
+  const rows = [candle(current - 2 * hour), candle(current - hour), candle(current)];
+  const oldFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async (_input, options) => {
+    calls++;
+    if (calls === 1) return new Promise((_resolve, reject) => {
+      options.signal.addEventListener("abort", () => reject(new Error("simulated request timeout")), { once: true });
+    });
+    return response(rows);
+  };
+  let resolveRepaired;
+  const repaired = new Promise(resolve => { resolveRepaired = resolve; });
+  const controller = createGateKlineController({
+    instruments: [], isHidden: () => false, requestTimeoutMs: 10,
+    onState: state => { if (state.status === "latest-gap-repaired") resolveRepaired(state); }
+  });
+  try {
+    await controller.select("SIM_TIMEOUT", contract, "1H");
+    await wait(repaired, 8000);
+    assert.equal(calls, 2);
+  } finally {
+    controller.destroy();
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("coalesces a manual refresh while the same series request is still in flight", async () => {
+  const contract = "SIM_COALESCE_USDT";
+  const current = Math.floor(Date.now() / 3600000) * 3600;
+  const rows = [candle(current - 2 * hour), candle(current - hour), candle(current)];
+  const oldFetch = globalThis.fetch;
+  let calls = 0, release;
+  let resolveStarted;
+  const started = new Promise(resolve => { resolveStarted = resolve; });
+  globalThis.fetch = async () => {
+    calls++;
+    if (calls === 1) {
+      resolveStarted();
+      return new Promise(resolve => { release = () => resolve(response(rows)); });
+    }
+    return response(rows);
+  };
+  const controller = createGateKlineController({ instruments: [], isHidden: () => false });
+  try {
+    await controller.select("SIM_COALESCE", contract, "1H");
+    await wait(started);
+    const refresh = controller.refresh();
+    assert.equal(calls, 1, "refresh must reuse the active request");
+    release();
+    await wait(refresh);
+    assert.equal(calls, 1);
+  } finally {
+    controller.destroy();
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("resumes the latest-data request after a page-hidden abort", async () => {
+  const contract = "SIM_RESUME_USDT";
+  const current = Math.floor(Date.now() / 3600000) * 3600;
+  const rows = [candle(current - 2 * hour), candle(current - hour), candle(current)];
+  const oldFetch = globalThis.fetch;
+  let hidden = false, calls = 0, resolveStarted, resolveAborted, resolveRepaired;
+  const started = new Promise(resolve => { resolveStarted = resolve; });
+  const aborted = new Promise(resolve => { resolveAborted = resolve; });
+  const repaired = new Promise(resolve => { resolveRepaired = resolve; });
+  globalThis.fetch = async (_input, options) => {
+    calls++;
+    if (calls === 1) return new Promise((_resolve, reject) => {
+      options.signal.addEventListener("abort", () => { resolveAborted(); reject(new Error("page hidden")); }, { once: true });
+      resolveStarted();
+    });
+    return response(rows);
+  };
+  const controller = createGateKlineController({
+    instruments: [], isHidden: () => hidden,
+    onState: state => { if (state.status === "latest-gap-repaired") resolveRepaired(state); }
+  });
+  try {
+    await controller.select("SIM_RESUME", contract, "1H");
+    await wait(started);
+    hidden = true;
+    controller.suspend();
+    await wait(aborted);
+    hidden = false;
+    controller.resume();
+    await wait(repaired, 10000);
+    assert.ok(calls >= 2);
+  } finally {
+    controller.destroy();
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("migrates legacy candle arrays into per-candle IndexedDB rows without data loss", async () => {
+  const contract = "SIM_MIGRATE_USDT", key = "gate-usdt:" + contract + ":1H";
+  const current = Math.floor(Date.now() / 3600000) * 3600;
+  const existing = candle(current - 3 * hour);
+  const legacyRows = [candle(current - 2 * hour), candle(current - hour)];
+  const db = await openTestDB();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(["candles", "candleRows"], "readwrite");
+    tx.objectStore("candles").put({ id: key, candles: legacyRows, historyBoundaryReached: false, latestGapStatus: "pending" });
+    tx.objectStore("candleRows").put({ id: key + "|" + existing.t, series: key, ...existing });
+    tx.oncomplete = resolve;
+    tx.onerror = tx.onabort = () => reject(tx.error);
+  });
+  db.close();
+  const oldFetch = globalThis.fetch;
+  globalThis.fetch = async () => response([]);
+  const controller = createGateKlineController({ instruments: [], isHidden: () => false });
+  try {
+    const selected = await controller.select("SIM_MIGRATE", contract, "1H");
+    assert.equal(selected, true);
+    assert.equal(controller.state.count, 3);
+    assert.equal(await readStore("candles", key), null);
+    for (const row of [existing, ...legacyRows]) {
+      assert.ok(await readStore("candleRows", key + "|" + row.t), "migrated candle " + row.t);
+    }
+  } finally {
+    controller.destroy();
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("keeps K-line updates available in bounded memory fallback when IndexedDB is unavailable", async () => {
+  const descriptor = Object.getOwnPropertyDescriptor(indexedDB, "open");
+  Object.defineProperty(indexedDB, "open", { configurable: true, writable: true, value: () => { throw new Error("simulated IndexedDB unavailable"); } });
+  const contract = "SIM_IDB_FALLBACK_USDT";
+  const current = Math.floor(Date.now() / 3600000) * 3600;
+  const rows = [candle(current - 2 * hour), candle(current - hour), candle(current)];
+  const oldFetch = globalThis.fetch;
+  let cacheUnavailable = false, resolveRepaired;
+  const repaired = new Promise(resolve => { resolveRepaired = resolve; });
+  globalThis.fetch = async () => response(rows);
+  const controller = createGateKlineController({
+    instruments: [], isHidden: () => false,
+    onState: state => {
+      if (state.status === "cache-unavailable") cacheUnavailable = true;
+      if (state.status === "latest-gap-repaired") resolveRepaired(state);
+    }
+  });
+  try {
+    await controller.select("SIM_IDB_FALLBACK", contract, "1H");
+    await wait(repaired);
+    assert.equal(cacheUnavailable, true);
+    assert.equal(controller.state.count, 3);
+  } finally {
+    controller.destroy();
+    globalThis.fetch = oldFetch;
+    if (descriptor) Object.defineProperty(indexedDB, "open", descriptor);
+    else delete indexedDB.open;
+  }
+});
+
+test("repairs the EMA cache after a full load and incrementally advances it by one candle", async () => {
+  const contract = "SIM_EMA_RECOVERY_USDT", key = "gate-usdt:" + contract + ":1H";
+  const current = Math.floor(Date.now() / 3600000) * 3600;
+  const initial = Array.from({ length: 700 }, (_, index) => candle(current - (700 - index) * hour));
+  let rows = initial;
+  const oldFetch = globalThis.fetch;
+  globalThis.fetch = async () => response(rows);
+  let resolveRepaired;
+  const repaired = new Promise(resolve => { resolveRepaired = resolve; });
+  const controller = createGateKlineController({
+    instruments: [], isHidden: () => false,
+    onState: state => { if (state.status === "latest-gap-repaired") resolveRepaired(state); }
+  });
+  try {
+    await controller.select("SIM_EMA_RECOVERY", contract, "1H");
+    await wait(repaired);
+    const firstMeta = await readStore("seriesMeta", "ema|" + key);
+    assert.equal(firstMeta.candleCount, 700);
+    rows = [...initial, candle(current)];
+    await wait(controller.refresh());
+    const updatedMeta = await readStore("seriesMeta", "ema|" + key);
+    assert.equal(updatedMeta.candleCount, 701);
+    assert.equal(updatedMeta.newestTimestamp, current);
+    const latestEma = await readStore("emaRows", key + "|" + current);
+    assert.ok(Number.isFinite(latestEma.e12));
+  } finally {
+    controller.destroy();
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("keeps multiple selected symbols in separate K-line cache series", async () => {
+  const current = Math.floor(Date.now() / 3600000) * 3600;
+  const oldFetch = globalThis.fetch;
+  globalThis.fetch = async input => {
+    const contract = new URL(String(input)).searchParams.get("contract");
+    const close = contract === "SIM_SYMBOL_A_USDT" ? 110 : 220;
+    return response([candle(current - 2 * hour, close), candle(current - hour, close), candle(current, close)]);
+  };
+  let repairedCount = 0, resolveBoth;
+  const bothRepaired = new Promise(resolve => { resolveBoth = resolve; });
+  const controller = createGateKlineController({
+    instruments: [], isHidden: () => false,
+    onState: state => { if (state.status === "latest-gap-repaired" && ++repairedCount >= 2) resolveBoth(); }
+  });
+  try {
+    await controller.select("SIM_SYMBOL_A", "SIM_SYMBOL_A_USDT", "1H");
+    await wait(bothRepaired);
+    await controller.select("SIM_SYMBOL_B", "SIM_SYMBOL_B_USDT", "1H");
+    await wait(bothRepaired);
+    const a = await readStore("candleRows", "gate-usdt:SIM_SYMBOL_A_USDT:1H|" + current);
+    const b = await readStore("candleRows", "gate-usdt:SIM_SYMBOL_B_USDT:1H|" + current);
+    assert.equal(a.c, 111);
+    assert.equal(b.c, 221);
+    assert.notEqual(a.c, b.c);
+  } finally {
+    controller.destroy();
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("validates continuity across a large 20,000-candle historical series", () => {
+  const now = Date.parse("2026-11-21T14:05:00Z");
+  const expected = expectedLatestCandleTimestamp("1H", now);
+  const rows = Array.from({ length: 20000 }, (_, index) => candle(expected - (19999 - index) * hour));
+  assert.equal(findCandleGaps(rows, "1H").length, 0);
+  assert.equal(hasLatestCoverage(rows, "1H", now), true);
+});
+
+test("enforces the per-series memory-cache cap without marking truncated history complete", async () => {
+  const descriptor = Object.getOwnPropertyDescriptor(indexedDB, "open");
+  Object.defineProperty(indexedDB, "open", { configurable: true, writable: true, value: () => { throw new Error("simulated IndexedDB unavailable"); } });
+  const contract = "SIM_MEMORY_LIMIT_USDT";
+  const current = Math.floor(Date.now() / 3600000) * 3600;
+  const rows = Array.from({ length: 12005 }, (_, index) => candle(current - (12004 - index) * hour));
+  const oldFetch = globalThis.fetch;
+  let limitEvent = false, resolveRepaired;
+  const repaired = new Promise(resolve => { resolveRepaired = resolve; });
+  globalThis.fetch = async () => response(rows);
+  const controller = createGateKlineController({
+    instruments: [], isHidden: () => false,
+    onState: state => {
+      if (state.status === "cache-memory-limit") limitEvent = true;
+      if (state.status === "latest-gap-repaired") resolveRepaired(state);
+    }
+  });
+  try {
+    await controller.select("SIM_MEMORY_LIMIT", contract, "1H");
+    await wait(repaired, 15000);
+    assert.equal(limitEvent, true);
+    assert.equal(controller.state.count, 12000);
+    assert.equal(controller.state.historyComplete, false);
+  } finally {
+    controller.destroy();
+    globalThis.fetch = oldFetch;
+    if (descriptor) Object.defineProperty(indexedDB, "open", descriptor);
+    else delete indexedDB.open;
   }
 });
