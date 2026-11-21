@@ -125,3 +125,45 @@ test("responsive layout contracts retain dynamic viewport and safe-area handling
   assert.match(full, /orientation|landscape|portrait/i);
   assert.match(cards, /ResizeObserver|touch-action|pointer-events|overflow/i);
 });
+
+
+test("all 22 catalog logos resolve to real local SVG assets", async () => {
+  for (const item of INSTRUMENTS) {
+    assert.ok(item.logo && item.logoGroup, `missing logo mapping for ${item.symbol}`);
+    const svg = await source(`assets/logos/${item.logoGroup}/${item.logo}.svg`);
+    assert.match(svg, /<svg[\s>]/i);
+  }
+});
+
+test("host, cards, timeframe and Logo retain their message integration contracts", async () => {
+  const runtime = await source("modules/v6-runtime.js");
+  const cards = await source("cards/rolling-cards.js");
+  const timeframe = await source("modules/timeframe-switch/index.html");
+  const logo = await source("modules/logo/logo.js");
+  assert.match(runtime, /event\.origin!==location\.origin/);
+  assert.match(runtime, /event\.source===timeframeFrame\?\.contentWindow/);
+  assert.match(runtime, /VEGAS_CARD_INTERACTION/);
+  assert.match(runtime, /VEGAS_CARD_SELECT/);
+  assert.match(runtime, /VEGAS_LOGO_SET_SYMBOL/);
+  assert.match(runtime, /VEGAS_TIMEFRAME_SET/);
+  assert.match(cards, /VEGAS_CARD_INTERACTION/);
+  assert.match(cards, /VEGAS_CARD_SELECT/);
+  assert.match(timeframe, /VEGAS_TIMEFRAME_SELECT/);
+  assert.match(logo, /VEGAS_LOGO_SET_SYMBOL/);
+  assert.match(logo, /VEGAS_LOGO_SET_TIMEFRAME/);
+});
+
+test("Gate quotes and V12 feed retain bounded foreground refresh and failure handling", async () => {
+  const runtime = await source("modules/v6-runtime.js");
+  const feed = await source("modules/signal-ticker/v12-feed.js");
+  const ticker = await source("modules/signal-ticker/ticker.js");
+  assert.match(runtime, /300000/);
+  assert.match(runtime, /api\.gateio\.ws\/api\/v4\/futures\/usdt\/tickers/);
+  assert.match(runtime, /attempt<3/);
+  assert.match(runtime, /new AbortController\(\)/);
+  assert.match(runtime, /feed\.read\(\)/);
+  assert.match(feed, /AbortController/);
+  assert.match(feed, /controller\.abort/);
+  assert.match(ticker, /signal-marquee/);
+  assert.match(ticker, /animationPlayState/);
+});
