@@ -101,10 +101,16 @@ if "universe-v6.js" not in runtime or "page-lifecycle-v6.js" not in runtime:
 if "createV6KlineView" not in runtime:
     fail("runtime is not wired to the V6 K-line view")
 
+# The global full-screen stylesheet is the sole owner of the timeframe iframe geometry.
+timeframe_host = (ROOT / "modules/timeframe-switch/host.css").read_text(encoding="utf-8")
+if re.search(r"#app\s+#timeframe-frame\s*\{[^}]*\bheight\s*:", timeframe_host):
+    fail("timeframe host stylesheet must not own outer iframe height")
 # Guard the global layout contract: Logo outer geometry must live only in the
 # global full-screen system, never in a Logo-specific host stylesheet.
 full_screen_path = ROOT / "assets/css/full-screen-dynamic.css"
 full_screen_source = full_screen_path.read_text(encoding="utf-8")
+if not re.search(r"#timeframe-frame\s*\{[^}]*\bheight\s*:", full_screen_source):
+    fail("global full-screen stylesheet must own timeframe iframe height")
 if not re.search(r"#logo-frame\s*\{[^}]*position\s*:\s*fixed", full_screen_source):
     fail("Logo outer geometry is missing from the global full-screen system")
 if (ROOT / "modules/logo/host.css").exists():
@@ -212,6 +218,16 @@ if not re.search(r"height:\s*20%", timeframe) or not re.search(r"flex:\s*0\s+0\s
     fail("five timeframe buttons do not use equal 20% height")
 if 'function aggregate2H' not in controller or 'INTERVALS=Object.freeze({"1H":"1h","2H":"1h"' not in controller:
     fail("2H aggregation from Gate 1H candles is missing")
+
+# Card quote/order APIs use one supported path; reject removed compatibility shims.
+card_source = (ROOT / "cards/rolling-cards.js").read_text(encoding="utf-8")
+if "window.updateQuote=" in card_source or "VEGAS_SET_CARD_ORDER" in card_source:
+    fail("obsolete single-quote or message-based card-order API remains")
+if "window.updateQuotes=function" not in card_source or "window.setCardOrder=function" not in card_source:
+    fail("card batch quote and direct order APIs are required")
+universe_source = (ROOT / "modules/shared/universe-v6.js").read_text(encoding="utf-8")
+if "category:index<" in universe_source or "...item,index" not in universe_source:
+    fail("instrument categories must come from explicit catalog fields, not array positions")
 
 # Guard the 22-symbol V8 local pool and 22-symbol V12 feed.
 catalog = (ROOT / "modules/shared/instrument-catalog.js").read_text(encoding="utf-8")

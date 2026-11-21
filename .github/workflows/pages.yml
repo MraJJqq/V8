@@ -99,10 +99,12 @@ jobs:
 
           touch .nojekyll
           python3 tools/validate_v8.py
-          node --input-type=module --check < kline/gate-kline-controller.js
+          while IFS= read -r -d '' file; do
+            node --input-type=module --check < "$file"
+          done < <(find . -name '*.js' -not -path './node_modules/*' -print0)
           npm install --prefix /tmp/v8-test-deps --no-save --package-lock=false fake-indexeddb@6.2.4
           ln -s /tmp/v8-test-deps/node_modules node_modules
-          node --test tests/kline-controller.test.mjs
+          node --test tests/*.test.mjs
           rm node_modules
 
           git config user.name "github-actions[bot]"
