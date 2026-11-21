@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   browser-kline:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - name: Checkout validation definition
