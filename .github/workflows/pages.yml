@@ -45,7 +45,7 @@ jobs:
           cp -a "$SRC/V6/modules" .
           cp "$SRC/V6/index.html" ./index.html
           cp "$SRC/V6/README.md" docs/V6-BASELINE.md
-          cp "$SRC/V6/OPERATING-FLOWS.md" docs/SEVEN-SYSTEMS.md
+          cp "$SRC/V6/OPERATING-FLOWS.md" docs/SIX-SYSTEMS.md
 
           # Copy all canonical Media asset collections.
           for dir in Backgrounds Brand Logos Cards Charts References Templates UI; do
@@ -61,7 +61,7 @@ jobs:
           # Apply only V8-specific documentation identity; facts come directly from Media.
           python3 - <<'PY'
           from pathlib import Path
-          p = Path("docs/SEVEN-SYSTEMS.md")
+          p = Path("docs/SIX-SYSTEMS.md")
           s = p.read_text(encoding="utf-8")
           s = s.replace("# VEGAS V6 — System Modules & Operating Flows", "# VEGAS V8 — System Modules & Operating Flows", 1)
           s = s.replace("This directory documents the six V6 systems.", "This directory documents the six V8 systems.", 1)
@@ -96,7 +96,7 @@ jobs:
           - `index.html`：V8 网页入口。
           - `assets/`、`cards/`、`kline/`、`modules/`：六大系统运行代码和本地依赖。
           - `Backgrounds/`、`Brand/`、`Logos/`、`Cards/`、`Charts/`、`References/`、`Templates/`、`UI/`：配套素材与规范。
-          - `docs/SEVEN-SYSTEMS.md`：六大系统职责、运行流程和集成契约。
+          - `docs/SIX-SYSTEMS.md`：六大系统职责、运行流程和集成契约。
           - `tools/validate_v8.py`：V8 静态完整性检查。
 
           GitHub Pages 由 `.github/workflows/pages.yml` 自动部署。
@@ -116,7 +116,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           if ! git diff --cached --quiet; then
-            git commit -m "Rebuild V8 from complete Media seven-system package"
+            git commit -m "Rebuild V8 from complete Media six-system package"
             git push origin HEAD:main
           fi
 

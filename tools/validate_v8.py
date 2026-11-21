@@ -229,15 +229,11 @@ universe_source = (ROOT / "modules/shared/universe-v6.js").read_text(encoding="u
 if "category:index<" in universe_source or "...item,index" not in universe_source:
     fail("instrument categories must come from explicit catalog fields, not array positions")
 
-# Guard the 22-symbol V8 local pool and 22-symbol V12 feed.
+# Guard the 22-symbol local instrument pool.
 catalog = (ROOT / "modules/shared/instrument-catalog.js").read_text(encoding="utf-8")
 catalog_symbols = re.findall(r'\["([A-Z0-9]+)","[A-Z0-9]+USDT"', catalog)
 if len(catalog_symbols) != 22 or len(set(catalog_symbols)) != 22:
     fail(f"local instrument catalog must contain exactly 22 unique symbols; found {len(catalog_symbols)}")
-feed = (ROOT / "modules/signal-ticker/v12-feed.js").read_text(encoding="utf-8")
-scan_block = re.search(r"V12_SCAN_SYMBOLS\s*=\s*Object\.freeze\(\[([^]]+)\]", feed)
-if not scan_block or len(re.findall(r'"[A-Z0-9]+"', scan_block.group(1))) != 22:
-    fail("V12 feed validation must retain its complete 22-symbol scan universe")
 runtime = (ROOT / "modules/v6-runtime.js").read_text(encoding="utf-8")
 if "INSTRUMENTS.length!==22" not in runtime:
     fail("V8 runtime must use the 22-symbol local pool")

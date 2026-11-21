@@ -88,7 +88,7 @@ test("page lifecycle suspends and resumes once across visibility and BFCache eve
 
 
 test("operating-flow documentation matches the current catalog and card interfaces", async () => {
-  const docs = await source("OPERATING-FLOWS.md").catch(() => source("docs/SEVEN-SYSTEMS.md"));
+  const docs = await source("OPERATING-FLOWS.md").catch(() => source("docs/SIX-SYSTEMS.md"));
   assert.match(docs, /modules\/shared\/instrument-catalog\.js/);
   assert.match(docs, /modules\/shared\/universe-v6\.js/);
   assert.doesNotMatch(docs, /gate-universe\.js/);

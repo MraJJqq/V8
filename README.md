@@ -23,7 +23,7 @@ VEGAS V8 is rebuilt from the Media library's complete six-system website package
 - `index.html`：V8 网页入口。
 - `assets/`、`cards/`、`kline/`、`modules/`：六大系统运行代码和本地依赖。
 - `Backgrounds/`、`Brand/`、`Logos/`、`Cards/`、`Charts/`、`References/`、`Templates/`、`UI/`：配套素材与规范。
-- `docs/SEVEN-SYSTEMS.md`：六大系统职责、运行流程和集成契约。
+- `docs/SIX-SYSTEMS.md`：六大系统职责、运行流程和集成契约。
 - `tools/validate_v8.py`：V8 静态完整性检查。
 
 GitHub Pages 由 `.github/workflows/pages.yml` 自动部署。
