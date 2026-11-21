@@ -37,7 +37,7 @@ jobs:
           mkdir -p docs tools
           printf '# Media source commit\n\n`%s`\n' "$MEDIA_SHA" > docs/MEDIA-SOURCE-COMMIT.md
 
-          # Copy the complete seven-system runtime from the Media baseline, including aligned 2H history repair and its tests.
+          # Copy the complete six-system runtime from the Media baseline, including aligned 2H history repair and its tests.
           cp -a "$SRC/V6/assets" .
           cp -a "$SRC/V6/cards" .
           cp -a "$SRC/V6/kline" .
@@ -62,9 +62,9 @@ jobs:
           p = Path("docs/SEVEN-SYSTEMS.md")
           s = p.read_text(encoding="utf-8")
           s = s.replace("# VEGAS V6 — System Modules & Operating Flows", "# VEGAS V8 — System Modules & Operating Flows", 1)
-          s = s.replace("This directory documents the seven V6 systems.", "This directory documents the seven V8 systems.", 1)
-          s = s.replace("This Media-specific operating-flow document is not part of the V6 runtime repository.", "This V8 deployment document describes the seven-system runtime synchronized from the Media V6 baseline.", 1)
-          s = s.replace("This package records the seven V6 systems.", "This package records the seven V8 systems.", 1)
+          s = s.replace("This directory documents the six V6 systems.", "This directory documents the six V8 systems.", 1)
+          s = s.replace("This Media-specific operating-flow document is not part of the V6 runtime repository.", "This V8 deployment document describes the six-system runtime synchronized from the Media V6 baseline.", 1)
+          s = s.replace("This package records the six V6 systems.", "This package records the six V8 systems.", 1)
           p.write_text(s, encoding="utf-8")
           PY
 
