@@ -33,7 +33,7 @@ jobs:
           SRC=/tmp/vegas-media
           mkdir -p docs tools assets/backgrounds
 
-          # Copy the complete seven-system runtime from the Media baseline.
+          # Copy the complete seven-system runtime from the Media baseline, including aligned 2H history repair and its tests.
           cp -a "$SRC/V6/assets" .
           cp -a "$SRC/V6/cards" .
           cp -a "$SRC/V6/kline" .
