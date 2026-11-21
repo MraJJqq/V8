@@ -53,35 +53,14 @@ jobs:
           # V8 branding only; runtime and display behavior remain Media-derived.
           sed -i 's/<title>VEGAS V6 · Gate<\/title>/<title>VEGAS V8 · Gate<\/title>/' index.html
 
-          # Update documentation for the implemented five-period selector.
+          # Apply only V8-specific documentation identity; facts come directly from Media.
           python3 - <<'PY'
           from pathlib import Path
           p = Path("docs/SEVEN-SYSTEMS.md")
           s = p.read_text(encoding="utf-8")
-          for old, new in (
-              ("four native display intervals: `1H`, `4H`, `8H`, `D`.",
-               "five native display intervals: `1H`, `2H`, `4H`, `8H`, `D`."),
-              ("accepted values are `1H`, `4H`, `8H`, and `D`.",
-               "accepted values are `1H`, `2H`, `4H`, `8H`, and `D`."),
-              ("Supported intervals in this system are `1H`, `4H`, `8H`, and `D`.",
-               "Supported intervals in this system are `1H`, `2H`, `4H`, `8H`, and `D`."),
-              ("all four intervals", "all five intervals"),
-              ("four intervals propagate", "five intervals propagate"),
-              ("24 个本地卡片", "22 个本地卡片"),
-              ("24 个本地 SVG 标识", "22 个本地 SVG 标识"),
-              ("V12 扫描池现为24个品种", "V12 扫描池现为22个品种"),
-              ("本地24个品种展示", "本地22个品种展示"),
-              ("24 个本地品种 Logo", "22 个启用品种 Logo"),
-              ("24-instrument universe", "22-instrument universe"),
-              ("24-item session rotation queue", "22-item session rotation queue"),
-              ("exactly 24 complete entries", "exactly 22 complete entries"),
-              ("24 symbols to its local SVG asset", "22 symbols to its local SVG asset"),
-              ("24 个品种", "22 个品种"),
-              ("24-item", "22-item"),
-              ("24 symbols", "22 symbols"),
-              ("24 SVG files", "22 active SVG files"),
-          ):
-              s = s.replace(old, new)
+          s = s.replace("# VEGAS V6 — System Modules & Operating Flows", "# VEGAS V8 — System Modules & Operating Flows", 1)
+          s = s.replace("This directory documents the seven V6 systems.", "This directory documents the seven V8 systems.", 1)
+          s = s.replace("This Media-specific operating-flow document is not part of the V6 runtime repository.", "This V8 deployment document describes the seven-system runtime synchronized from the Media V6 baseline.", 1)
           p.write_text(s, encoding="utf-8")
           PY
 
