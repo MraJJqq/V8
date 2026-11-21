@@ -131,6 +131,10 @@ if "historyRetryDelay" not in controller or "retryDueAt" not in controller:
     fail("persisted retry backoff state is missing")
 if "GATE_REQUEST_TIMEOUT_MS" not in controller or "gate-request-timeout" not in controller:
     fail("Gate candle requests are missing bounded timeout and timeout retry handling")
+if "mode:\"memory-fallback\"" not in controller or "cache-read-failed" not in controller:
+    fail("IndexedDB transaction failures do not fall back to bounded in-memory candles")
+if "updateEmaCache" not in controller:
+    fail("EMA cache failures can still interrupt K-line data refresh")
 if "pending.finally" not in controller or "resumeTimeframe" not in controller:
     fail("page resume does not wait for an aborted latest request before restarting")
 if 'DB_NAME="vegas-v6-market-cache"' not in controller:

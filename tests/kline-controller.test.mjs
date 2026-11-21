@@ -347,33 +347,40 @@ test("migrates legacy candle arrays into per-candle IndexedDB rows without data 
   }
 });
 
-test("keeps K-line updates available in bounded memory fallback when IndexedDB is unavailable", async () => {
-  const descriptor = Object.getOwnPropertyDescriptor(indexedDB, "open");
-  Object.defineProperty(indexedDB, "open", { configurable: true, writable: true, value: () => { throw new Error("simulated IndexedDB unavailable"); } });
-  const contract = "SIM_IDB_FALLBACK_USDT";
+test("keeps K-line updates available when IndexedDB read/write transactions fail", async () => {
+  const db = await openTestDB();
+  const prototype = Object.getPrototypeOf(db);
+  const originalTransaction = prototype.transaction;
+  prototype.transaction = function(storeNames, mode, ...options) {
+    if (mode === "readwrite") throw new Error("simulated IndexedDB transaction failure");
+    return originalTransaction.call(this, storeNames, mode, ...options);
+  };
+  db.close();
+  const contract = "SIM_IDB_WRITE_FALLBACK_USDT";
   const current = Math.floor(Date.now() / 3600000) * 3600;
   const rows = [candle(current - 2 * hour), candle(current - hour), candle(current)];
   const oldFetch = globalThis.fetch;
-  let cacheUnavailable = false, resolveRepaired;
+  let cacheReadFailed = false, cacheWriteFailed = false, resolveRepaired;
   const repaired = new Promise(resolve => { resolveRepaired = resolve; });
   globalThis.fetch = async () => response(rows);
   const controller = createGateKlineController({
     instruments: [], isHidden: () => false,
     onState: state => {
-      if (state.status === "cache-unavailable") cacheUnavailable = true;
+      if (state.status === "cache-read-failed") cacheReadFailed = true;
+      if (state.status === "cache-write-failed" && state.mode === "memory-fallback") cacheWriteFailed = true;
       if (state.status === "latest-gap-repaired") resolveRepaired(state);
     }
   });
   try {
-    await controller.select("SIM_IDB_FALLBACK", contract, "1H");
+    await controller.select("SIM_IDB_WRITE_FALLBACK", contract, "1H");
     await wait(repaired);
-    assert.equal(cacheUnavailable, true);
+    assert.equal(cacheReadFailed, true);
+    assert.equal(cacheWriteFailed, true);
     assert.equal(controller.state.count, 3);
   } finally {
     controller.destroy();
     globalThis.fetch = oldFetch;
-    if (descriptor) Object.defineProperty(indexedDB, "open", descriptor);
-    else delete indexedDB.open;
+    prototype.transaction = originalTransaction;
   }
 });
 
@@ -395,6 +402,17 @@ test("repairs the EMA cache after a full load and incrementally advances it by o
     await wait(repaired);
     const firstMeta = await readStore("seriesMeta", "ema|" + key);
     assert.equal(firstMeta.candleCount, 700);
+    const db = await openTestDB();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(["seriesMeta"], "readwrite");
+      tx.objectStore("seriesMeta").put({ ...firstMeta, sourceSignature: "interrupted-ema-write" });
+      tx.oncomplete = resolve;
+      tx.onerror = tx.onabort = () => reject(tx.error);
+    });
+    db.close();
+    await wait(controller.refresh());
+    const rebuiltMeta = await readStore("seriesMeta", "ema|" + key);
+    assert.notEqual(rebuiltMeta.sourceSignature, "interrupted-ema-write");
     rows = [...initial, candle(current)];
     await wait(controller.refresh());
     const updatedMeta = await readStore("seriesMeta", "ema|" + key);

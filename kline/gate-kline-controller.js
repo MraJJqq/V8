@@ -122,6 +122,15 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
   dbp=openDB().catch(error=>{dbRetryAt=Date.now()+15000;dbp=null;onState({status:"cache-unavailable",mode:"memory-fallback",retryInMs:15000,error:String(error?.message||error)});return null;});
   return dbp;
  }
+ async function updateEmaCache(key,rows,full=false){
+  try{
+   const db=await getDB();
+   return full?await ensureEmaSeries(key,rows,db):await updateLatestEma(key,rows,db);
+  }catch(error){
+   onState({status:"ema-cache-write-failed",key,error:String(error?.message||error)});
+   return false;
+  }
+ }
  let symbol="",contract="",timeframe="4H",candles=[],complete=false,ws=null,retryTimer=0,pingTimer=0,stopped=false,selection=0,contractsPromise=null,wsSubscription=null,writeTimer=0;
  const pendingWrites=new Map(),requestControllers=new Set(),latestJobs=new Map(),latestCheckedAt=new Map();
  let queueRunning=false,queueRestartRequested=false,paused=false,historyRetryTimer=0;
@@ -147,6 +156,10 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
     const normalized=rows.map(({id,series,...c})=>c),volatile=memoryCache.get(key);result={...(meta||legacy||{historyBoundaryReached:false,latestGapStatus:"pending"}),candles:merge(normalized,oldRows,volatile?.candles),historyBoundaryReached:meta?.historyBoundaryReached===true||legacy?.historyBoundaryReached===true||volatile?.historyBoundaryReached===true,latestGapStatus:volatile?.latestGapStatus||meta?.latestGapStatus||legacy?.latestGapStatus||"pending",cacheMode:"indexeddb"};if(legacy){memoryCache.delete(key);memoryCacheIncomplete.delete(key)}};
    legacyReq.onsuccess=()=>{legacy=legacyReq.result||null;finish()};rowsReq.onsuccess=()=>{rows=rowsReq.result||[];finish()};metaReq.onsuccess=()=>{meta=metaReq.result||null;finish()};
    legacyReq.onerror=rowsReq.onerror=metaReq.onerror=()=>{try{tx.abort()}catch(_){}};tx.oncomplete=()=>resolve(result||{candles:[],historyBoundaryReached:false,latestGapStatus:"pending"});tx.onerror=tx.onabort=()=>reject(tx.error||new Error("IndexedDB cache read/migration failed"))
+  }).catch(error=>{
+   const fallback=memoryCache.get(key);
+   onState({status:"cache-read-failed",key,mode:"memory-fallback",error:String(error?.message||error)});
+   return fallback||{candles:[],historyBoundaryReached:false,latestGapStatus:"pending",cacheMode:"memory",lastError:String(error?.message||error)};
   })
  }
  async function checkStorage(){if(Date.now()-storageCheckAt<300000||!navigator.storage?.estimate)return;storageCheckAt=Date.now();try{const e=await navigator.storage.estimate(),usage=Number(e.usage)||0,quota=Number(e.quota)||0,ratio=quota?usage/quota:0;if(ratio>=.8)onState({status:"cache-storage-pressure",usageBytes:usage,quotaBytes:quota,usageRatio:ratio,level:ratio>=.9?"critical":"warning"})}catch(_){}}
@@ -188,6 +201,7 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
  }
  async function write(key,rows,done,status="ok",error=null){
   const db=await getDB();if(!db){putMemory(key,memoryCache.get(key)||{},rows,done,status,error);return}
+  try{
   await new Promise((resolve,reject)=>{let tx;try{tx=db.transaction([LEGACY_STORE,STORE,META_STORE],"readwrite")}catch(e){reject(e);return}
    const legacyStore=tx.objectStore(LEGACY_STORE),rowsStore=tx.objectStore(STORE),metaStore=tx.objectStore(META_STORE),legacyReq=legacyStore.get(key),metaReq=metaStore.get(key);let lr=false,mr=false,failed=false;
    const fail=e=>{if(failed)return;failed=true;try{tx.abort()}catch(_){}reject(e||new Error("IndexedDB cache write failed"))};
@@ -196,9 +210,15 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
     const save=()=>{if(!cd||!fd||!rd)return;const boundary=done===true||previous.historyBoundaryReached===true,gap=status==="latest-verified"?"clear":(["latest-data-updated","history-gap-pending","failed","paused"].includes(status)?"pending":(previous.latestGapStatus||"pending"));metaStore.put({id:key,source:"Gate USDT perpetual",updatedAt:Date.now(),schemaVersion:3,historyComplete:boundary&&gap==="clear",historyBoundaryReached:boundary,historyBoundaryStatus:boundary?"api-empty-page-confirmed":"not-yet-confirmed",latestGapStatus:gap,requestStatus:status,lastError:error??(status==="failed"?previous.lastError:null),candleCount:count,oldestTimestamp:first?.value?.t??null,newestTimestamp:last?.value?.t??null,cacheMode:"indexeddb"})};
     cr.onsuccess=()=>{count=cr.result;cd=true;save()};fr.onsuccess=()=>{first=fr.result;fd=true;save()};rr.onsuccess=()=>{last=rr.result;rd=true;save()};cr.onerror=fr.onerror=rr.onerror=()=>fail(new Error("IndexedDB cache index update failed"))};
    legacyReq.onsuccess=()=>{lr=true;apply()};metaReq.onsuccess=()=>{mr=true;apply()};legacyReq.onerror=metaReq.onerror=()=>fail(tx.error);tx.oncomplete=()=>{memoryCache.delete(key);memoryCacheIncomplete.delete(key);resolve()};tx.onerror=tx.onabort=()=>fail(tx.error||new Error("IndexedDB write transaction failed"))
-  });void checkStorage()
+  })
+  }catch(error){
+   putMemory(key,memoryCache.get(key)||{},rows,done,status,String(error?.message||error));
+   onState({status:"cache-write-failed",key,mode:"memory-fallback",error:String(error?.message||error)});
+   return;
+  }
+  void checkStorage()
  } function scheduleWrite(key,rows,done,status="ok",error=null){pendingWrites.set(key,{rows:rows.slice(),done,status,error});if(!writeTimer)writeTimer=setTimeout(()=>{void flushPendingWrites()},750)}
- async function flushPendingWrites(){if(writeTimer){clearTimeout(writeTimer);writeTimer=0}const jobs=[...pendingWrites.entries()];pendingWrites.clear();await Promise.all(jobs.map(async([key,p])=>{try{await write(key,p.rows,p.done,p.status,p.error,true);const snapshot=await read(key);await updateLatestEma(key,snapshot.candles,await getDB())}catch(error){onState({status:"cache-write-failed",key,error:String(error?.message||error)})}}))}
+ async function flushPendingWrites(){if(writeTimer){clearTimeout(writeTimer);writeTimer=0}const jobs=[...pendingWrites.entries()];pendingWrites.clear();await Promise.all(jobs.map(async([key,p])=>{try{await write(key,p.rows,p.done,p.status,p.error,true);const snapshot=await read(key);await updateEmaCache(key,snapshot.candles)}catch(error){onState({status:"cache-write-failed",key,error:String(error?.message||error)})}}))}
  function mergeLive(rows,incoming){for(const item of incoming){const last=rows[rows.length-1];if(!last||item.t>last.t){rows.push(item);continue}if(item.t===last.t){rows[rows.length-1]=item;continue}const index=rows.findIndex(row=>row.t===item.t);if(index>=0)rows[index]=item;else{rows.push(item);rows.sort((a,b)=>a.t-b.t)}}return rows}
  async function request(url,tf){
   let lastError;
@@ -281,7 +301,7 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
   if(!canWork()){await write(key,verified,true,"paused");return}
   if(!hasLatestCoverage(verified,tf))throw new Error("Latest Gate candle coverage is stale or incomplete");
   await write(key,verified,true,"latest-verified");
-  await ensureEmaSeries(key,verified,await getDB());
+  await updateEmaCache(key,verified,true);
   if(isActive(c,tf)){candles=verified;complete=true;render(verified,selection,tf)}
   completed.add(key);failed.delete(key);return;
  }
@@ -299,7 +319,7 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
   if(rows.length!==before)done=false;
   await write(key,rows,done,fresh.length?"latest-verified":"history-backfill");
   if(isActive(c,tf)){candles=rows;complete=done;render(rows,selection,tf)}
-  if(done){await ensureEmaSeries(key,rows,await getDB());completed.add(key);failed.delete(key);return}
+  if(done){await updateEmaCache(key,rows,true);completed.add(key);failed.delete(key);return}
   while(canWork()&&rows.length){
    let page=await older(c,tf,rows[0].t);
    if(!canWork()){await write(key,rows,false,"paused");return}
@@ -317,7 +337,7 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
    if(isActive(c,tf)){candles=rows;complete=false;render(rows,selection,tf)}
    // A short page is not proof of the oldest history boundary. Probe the next earlier window; only an empty successful page confirms the boundary.
   }
-  await ensureEmaSeries(key,rows,await getDB());
+  await updateEmaCache(key,rows,true);
   if(done){completed.add(key);failed.delete(key)}
   if(isActive(c,tf)){candles=rows;complete=done;render(rows,selection,tf);onState({symbol,contract:c,timeframe:tf,count:rows.length,historyComplete:done,status:done?"history-boundary-reached":"paused"})}
  }
@@ -378,7 +398,7 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
    const base=isActive(c,tf)?candles:cached.candles;
    let merged=merge(base,freshRows);
    await write(key,merged,cached.historyBoundaryReached===true,"latest-data-updated");
-   await updateLatestEma(key,merged,await getDB());
+   await updateEmaCache(key,merged);
    latestCheckedAt.set(key,Date.now());
    if(isActive(c,tf)&&current(token)){
     const saved=await read(key);candles=merge(saved.candles);complete=saved.historyComplete===true;render(candles,token,tf);
@@ -390,12 +410,13 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
     if(!hasLatestCoverage(repaired,tf))throw new Error("Latest Gate candle coverage is stale or incomplete");
     if(repaired.length!==merged.length){
      await write(key,repaired,cached.historyBoundaryReached===true,"latest-verified");
-     await updateLatestEma(key,repaired,await getDB());
+     await updateEmaCache(key,repaired);
      if(isActive(c,tf)&&current(token)){candles=merge(repaired);render(candles,token,tf)}
     }else{
      await write(key,repaired,cached.historyBoundaryReached===true,"latest-verified");
     }
-    const clearedLatestTask=await clearRepairTask(key,"latest");
+    let clearedLatestTask=false;
+    try{clearedLatestTask=await clearRepairTask(key,"latest")}catch(error){onState({status:"repair-task-cleanup-failed",key,error:String(error?.message||error)})}
     if(clearedLatestTask){failed.delete(key);retryAttempts.delete(key);retryDueAt.delete(key)}
     onState({symbol,contract:c,timeframe:tf,status:"latest-gap-repaired",count:repaired.length});
    }catch(error){
@@ -403,7 +424,7 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
     const message=String(error?.message||error),attempt=(retryAttempts.get(key)||0)+1,nextRetryAt=Date.now()+historyRetryDelay(attempt);
     retryAttempts.set(key,attempt);retryDueAt.set(key,nextRetryAt);failed.set(key,message);
     await write(key,savedAfterRepair.candles,cached.historyBoundaryReached===true,"history-gap-pending",message);
-    await updateLatestEma(key,savedAfterRepair.candles,await getDB());
+    await updateEmaCache(key,savedAfterRepair.candles);
     try{await persistRepairTask(key,message,attempt,"latest")}catch(persistError){onState({status:"repair-task-persist-failed",key,error:String(persistError?.message||persistError)})}
     scheduleHistoryRetry();
     if(isActive(c,tf)&&current(token)){candles=merge(savedAfterRepair.candles);render(candles,token,tf);onState({symbol,contract:c,timeframe:tf,status:"history-gap-pending",error:message});}
