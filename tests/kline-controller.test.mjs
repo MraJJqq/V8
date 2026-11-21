@@ -416,17 +416,22 @@ test("keeps multiple selected symbols in separate K-line cache series", async ()
     const close = contract === "SIM_SYMBOL_A_USDT" ? 110 : 220;
     return response([candle(current - 2 * hour, close), candle(current - hour, close), candle(current, close)]);
   };
-  let repairedCount = 0, resolveBoth;
-  const bothRepaired = new Promise(resolve => { resolveBoth = resolve; });
+  let resolveA, resolveB;
+  const repairedA = new Promise(resolve => { resolveA = resolve; });
+  const repairedB = new Promise(resolve => { resolveB = resolve; });
   const controller = createGateKlineController({
     instruments: [], isHidden: () => false,
-    onState: state => { if (state.status === "latest-gap-repaired" && ++repairedCount >= 2) resolveBoth(); }
+    onState: state => {
+      if (state.status !== "latest-gap-repaired") return;
+      if (state.symbol === "SIM_SYMBOL_A") resolveA(state);
+      if (state.symbol === "SIM_SYMBOL_B") resolveB(state);
+    }
   });
   try {
     await controller.select("SIM_SYMBOL_A", "SIM_SYMBOL_A_USDT", "1H");
-    await wait(bothRepaired);
+    await wait(repairedA);
     await controller.select("SIM_SYMBOL_B", "SIM_SYMBOL_B_USDT", "1H");
-    await wait(bothRepaired);
+    await wait(repairedB);
     const a = await readStore("candleRows", "gate-usdt:SIM_SYMBOL_A_USDT:1H|" + current);
     const b = await readStore("candleRows", "gate-usdt:SIM_SYMBOL_B_USDT:1H|" + current);
     assert.equal(a.c, 111);
