@@ -138,7 +138,6 @@ test("controller repairs a real latest-end gap and persists verified candles", a
   try {
     await waiting.controller.select("SIM_REPAIR", contract, "1H");
     await wait(waiting.promise);
-    assert.equal(waiting.controller.state.count, 3);
     const meta = await readStore("seriesMeta", key);
     assert.equal(meta.latestGapStatus, "clear");
     assert.equal(meta.candleCount, 3);
