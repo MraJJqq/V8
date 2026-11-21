@@ -1,0 +1,161 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import "fake-indexeddb/auto";
+
+const source = await readFile(new URL("../kline/gate-kline-controller.js", import.meta.url), "utf8");
+const moduleUrl = "data:text/javascript;base64," + Buffer.from(source).toString("base64");
+const { aggregate2H, createGateKlineController, findCandleGaps, hasLatestCoverage, historyRetryDelay } = await import(moduleUrl);
+const hour = 3600;
+const candle = (t, close = 100) => ({ t, o: close, h: close + 2, l: close - 2, c: close + 1 });
+const utc = value => Math.floor(Date.parse(value) / 1000);
+globalThis.window = { indexedDB: globalThis.indexedDB };
+Object.defineProperty(globalThis, "navigator", { configurable: true, value: { storage: { estimate: async () => ({ usage: 1, quota: 100 }) } } });
+
+function response(rows) { return { ok: true, status: 200, json: async () => rows }; }
+function waitForState(expected, timeoutMs = 6000) {
+  let resolve, reject;
+  const promise = new Promise((a, b) => { resolve = a; reject = b; });
+  const timer = setTimeout(() => reject(new Error("Timed out waiting for controller state: " + expected)), timeoutMs);
+  const controller = createGateKlineController({ instruments: [], isHidden: () => false, onState: state => {
+    if (state.status === expected) { clearTimeout(timer); resolve(state); }
+  }});
+  return { controller, promise };
+}
+function wait(promise, timeoutMs = 7000) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("Controller integration test timed out")), timeoutMs);
+    promise.then(value => { clearTimeout(timer); resolve(value); }, error => { clearTimeout(timer); reject(error); });
+  });
+}
+function readStore(storeName, key) {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open("vegas-v6-market-cache", 3);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const db = request.result, tx = db.transaction([storeName], "readonly");
+      const get = tx.objectStore(storeName).get(key);
+      get.onsuccess = () => { const result = get.result || null; db.close(); resolve(result); };
+      get.onerror = () => { db.close(); reject(get.error); };
+    };
+  });
+}
+
+test("detects isolated and consecutive historical gaps", () => {
+  const rows = [candle(0), candle(2 * hour), candle(6 * hour)];
+  assert.deepEqual(findCandleGaps(rows, "1H"), [
+    { from: hour, to: hour, missingCount: 1, misaligned: false },
+    { from: 3 * hour, to: 5 * hour, missingCount: 3, misaligned: false }
+  ]);
+});
+
+test("rejects off-grid and non-integral candle timestamps", () => {
+  const rows = [candle(0), candle(hour + 60)];
+  assert.equal(findCandleGaps(rows, "1H")[0].misaligned, true);
+  assert.equal(hasLatestCoverage(rows, "1H", 2 * hour + 5 * 60 * 1000), false);
+});
+
+test("checks latest closed-candle coverage across all five timeframes", () => {
+  const now = Date.parse("2026-11-21T14:05:00Z");
+  for (const [tf, step] of [["1H", 3600], ["2H", 7200], ["4H", 14400], ["8H", 28800], ["D", 86400]]) {
+    const currentBucket = Math.floor(Math.floor(now / 1000) / step) * step;
+    const expected = currentBucket - step;
+    assert.equal(hasLatestCoverage([candle(expected)], tf, now), true, tf + " complete latest candle");
+    assert.equal(hasLatestCoverage([candle(expected - step)], tf, now), false, tf + " missing latest candle");
+  }
+});
+
+test("allows Gate publication grace immediately after a timeframe boundary", () => {
+  const now = Date.parse("2026-11-21T14:00:30Z");
+  assert.equal(hasLatestCoverage([candle(utc("2026-11-21T12:00:00Z"))], "1H", now), true);
+  assert.equal(hasLatestCoverage([candle(utc("2026-11-21T12:00:00Z"))], "1H", Date.parse("2026-11-21T14:03:00Z")), false);
+});
+
+test("2H aggregation rejects a missing first or second historical 1H candle", () => {
+  const now = Date.parse("2026-11-21T16:30:00Z");
+  const firstMissing = aggregate2H([candle(utc("2026-11-21T15:00:00Z"))], now);
+  const secondMissing = aggregate2H([candle(utc("2026-11-21T14:00:00Z"))], now);
+  assert.equal(firstMissing.some(row => row.t === utc("2026-11-21T14:00:00Z")), false);
+  assert.equal(secondMissing.some(row => row.t === utc("2026-11-21T14:00:00Z")), false);
+});
+
+test("2H aggregation preserves OHLC and partial active bucket across UTC boundary", () => {
+  const now = Date.parse("2026-11-22T00:30:00Z");
+  const rows = aggregate2H([
+    candle(utc("2026-11-21T22:00:00Z"), 100),
+    candle(utc("2026-11-21T23:00:00Z"), 110),
+    candle(utc("2026-11-22T00:00:00Z"), 120)
+  ], now);
+  assert.deepEqual(rows.find(row => row.t === utc("2026-11-21T22:00:00Z")), { t: utc("2026-11-21T22:00:00Z"), o: 100, h: 112, l: 98, c: 111 });
+  assert.deepEqual(rows.find(row => row.t === utc("2026-11-22T00:00:00Z")), { t: utc("2026-11-22T00:00:00Z"), o: 120, h: 122, l: 118, c: 121 });
+});
+
+test("retry backoff grows exponentially and caps at five minutes", () => {
+  assert.deepEqual([0, 1, 2, 3, 4, 5, 6].map(historyRetryDelay), [30000, 60000, 120000, 240000, 300000, 300000, 300000]);
+});
+
+test("controller repairs a real latest-end gap and persists verified candles", async () => {
+  const contract = "SIM_REPAIR_USDT", key = "gate-usdt:" + contract + ":1H";
+  const current = Math.floor(Date.now() / 3600000) * 3600;
+  const missing = candle(current - hour), latestRows = [candle(current - 2 * hour), candle(current)];
+  const oldFetch = globalThis.fetch;
+  globalThis.fetch = async input => {
+    const url = new URL(String(input));
+    if (url.searchParams.has("from")) return response([missing]);
+    return response(latestRows);
+  };
+  const waiting = waitForState("latest-gap-repaired");
+  try {
+    await waiting.controller.select("SIM_REPAIR", contract, "1H");
+    await wait(waiting.promise);
+    assert.equal(waiting.controller.state.count, 3);
+    const meta = await readStore("seriesMeta", key);
+    assert.equal(meta.latestGapStatus, "clear");
+    assert.equal(meta.candleCount, 3);
+  } finally {
+    waiting.controller.destroy();
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("failed latest-gap repair persists and restores its task after controller recreation", async () => {
+  const contract = "SIM_RESTART_USDT", key = "gate-usdt:" + contract + ":1H";
+  const current = Math.floor(Date.now() / 3600000) * 3600;
+  const incomplete = [candle(current - 2 * hour), candle(current)];
+  const oldFetch = globalThis.fetch;
+  globalThis.fetch = async input => {
+    const url = new URL(String(input));
+    if (url.searchParams.has("from")) return response([]);
+    return response(incomplete);
+  };
+  const first = waitForState("history-gap-pending");
+  try {
+    await first.controller.select("SIM_RESTART", contract, "1H");
+    await wait(first.promise);
+    const task = await readStore("seriesMeta", "repairTask|" + key);
+    assert.equal(task.kind, "latest");
+    assert.equal(task.status, "pending");
+    assert.ok(task.nextRetryAt > Date.now());
+  } finally {
+    first.controller.destroy();
+  }
+  let resolveRestored, resolveRepaired;
+  const restoredPromise = new Promise(resolve => { resolveRestored = resolve; });
+  const repairedPromise = new Promise(resolve => { resolveRepaired = resolve; });
+  const complete = [candle(current - 2 * hour), candle(current - hour), candle(current)];
+  globalThis.fetch = async () => response(complete);
+  const second = createGateKlineController({ instruments: [], isHidden: () => false, onState: state => {
+    if (state.status === "repair-tasks-restored") resolveRestored(state);
+    if (state.status === "latest-gap-repaired") resolveRepaired(state);
+  }});
+  try {
+    await second.select("SIM_RESTART", contract, "1H");
+    const [restored] = await wait(Promise.all([restoredPromise, repairedPromise]));
+    assert.equal(restored.count, 1);
+    assert.ok(restored.keys.includes(key));
+    assert.equal(await readStore("seriesMeta", "repairTask|" + key), null);
+  } finally {
+    second.destroy();
+    globalThis.fetch = oldFetch;
+  }
+});

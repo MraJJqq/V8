@@ -5,17 +5,29 @@ const INTERVALS=Object.freeze({"1H":"1h","2H":"1h","4H":"4h","8H":"8h","D":"1d"}
 const TIMEFRAMES=Object.freeze(["1H","2H","4H","8H","D"]);
 const MS=Object.freeze({"1H":3600000,"2H":7200000,"4H":14400000,"8H":28800000,"D":86400000});
 const PAGE=2000,API="https://api.gateio.ws/api/v4/futures/usdt",WS_URL="wss://fx-ws.gateio.ws/v4/ws/usdt";
+export function findCandleGaps(rows,tf){
+ const step=MS[tf]/1000;if(!step||!Array.isArray(rows))throw new TypeError("Unsupported timeframe or candle rows");
+ const gaps=[];for(let i=1;i<rows.length;i++){const previous=rows[i-1].t,current=rows[i].t,delta=current-previous,misaligned=previous%step!==0||current%step!==0||delta%step!==0;if(delta>step||misaligned)gaps.push({from:previous+step,to:current-step,missingCount:Math.max(0,Math.floor(delta/step)-1),misaligned})}return gaps;
+}
+export function hasLatestCoverage(rows,tf,now=Date.now(),graceMs=120000){
+ const stepMs=MS[tf];if(!stepMs||!Array.isArray(rows)||!rows.length)return false;
+ const step=stepMs/1000;if(rows.some(row=>!Number.isFinite(row.t)||row.t%step!==0)||findCandleGaps(rows,tf).length)return false;
+ const bucket=Math.floor(now/stepMs)*stepMs,withinBucket=now-bucket;
+ const expected=bucket-stepMs-(withinBucket<Math.min(graceMs,stepMs/10)?stepMs:0);
+ return rows[rows.length-1].t>=expected/1000;
+}
+export function historyRetryDelay(attempt){return Math.min(300000,30000*2**Math.min(Math.max(0,Number(attempt)||0),4));}
 const keyOf=(contract,tf)=>"gate-usdt:"+contract+":"+tf;
 const normalize=rows=>(Array.isArray(rows)?rows:[]).map(r=>({t:Number(r.t??r[0]),o:Number(r.o??r[5]??r[1]),h:Number(r.h??r[3]??r[2]),l:Number(r.l??r[4]??r[3]),c:Number(r.c??r[2]??r[4])})).filter(x=>Number.isFinite(x.t)&&x.t>0&&[x.o,x.h,x.l,x.c].every(v=>Number.isFinite(v)&&v>0)&&x.h>=Math.max(x.o,x.c)&&x.l<=Math.min(x.o,x.c)&&x.h>=x.l);
 const merge=(...groups)=>{const m=new Map();for(const g of groups)for(const c of g||[])m.set(c.t,c);return [...m.values()].sort((a,b)=>a.t-b.t)};
-function aggregate2H(rows){
+export function aggregate2H(rows,now=Date.now()){
  const groups=new Map();
  for(const candle of merge(rows)){
   const start=Math.floor(candle.t/7200)*7200;
   if(!groups.has(start))groups.set(start,[]);
   groups.get(start).push(candle);
  }
- const currentHour=Math.floor(Date.now()/3600000)*3600,currentBucket=Math.floor(currentHour/7200)*7200,out=[];
+ const currentHour=Math.floor(now/3600000)*3600,currentBucket=Math.floor(currentHour/7200)*7200,out=[];
  for(const [start,items] of groups){
   items.sort((a,b)=>a.t-b.t);
   const first=items[0],second=items[1],isCurrent=start===currentBucket;
@@ -109,7 +121,8 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
  let symbol="",contract="",timeframe="4H",candles=[],complete=false,ws=null,retryTimer=0,pingTimer=0,stopped=false,selection=0,contractsPromise=null,wsSubscription=null,writeTimer=0;
  const pendingWrites=new Map(),requestControllers=new Set(),latestJobs=new Map(),latestCheckedAt=new Map();
  let queueRunning=false,queueRestartRequested=false,paused=false,historyRetryTimer=0;
- const completed=new Set(),failed=new Map(),retryAttempts=new Map();
+ const completed=new Set(),failed=new Map(),retryAttempts=new Map(),retryDueAt=new Map();
+ let repairTasksLoaded=false,repairTasksLoading=null;
  let forceLatestSweep=false;
  const canWork=()=>!stopped&&!paused&&!isHidden();
  function trimMemoryCache(){
@@ -133,26 +146,40 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
   })
  }
  async function checkStorage(){if(Date.now()-storageCheckAt<300000||!navigator.storage?.estimate)return;storageCheckAt=Date.now();try{const e=await navigator.storage.estimate(),usage=Number(e.usage)||0,quota=Number(e.quota)||0,ratio=quota?usage/quota:0;if(ratio>=.8)onState({status:"cache-storage-pressure",usageBytes:usage,quotaBytes:quota,usageRatio:ratio,level:ratio>=.9?"critical":"warning"})}catch(_){}}
- async function persistRepairTask(key,error,attempt){
+ async function persistRepairTask(key,error,attempt,kind="history"){
   const db=await getDB();if(!db)return false;
   return new Promise((resolve,reject)=>{
    let tx;try{tx=db.transaction([META_STORE],"readwrite")}catch(e){reject(e);return}
-   tx.objectStore(META_STORE).put({id:"repairTask|"+key,key,status:"pending",error:String(error||""),attempt,nextRetryAt:Date.now()+Math.min(300000,30000*2**Math.min(attempt,4)),updatedAt:Date.now()});
+   tx.objectStore(META_STORE).put({id:"repairTask|"+key,key,kind,status:"pending",error:String(error||""),attempt,nextRetryAt:Date.now()+historyRetryDelay(attempt),updatedAt:Date.now()});
    tx.oncomplete=()=>resolve(true);tx.onerror=tx.onabort=()=>reject(tx.error||new Error("Repair task persistence failed"));
   });
  }
- async function clearRepairTask(key){
+ async function clearRepairTask(key,kind=null){
   const db=await getDB();if(!db)return false;
   return new Promise((resolve,reject)=>{
-   let tx;try{tx=db.transaction([META_STORE],"readwrite")}catch(e){reject(e);return}
-   tx.objectStore(META_STORE).delete("repairTask|"+key);
-   tx.oncomplete=()=>resolve(true);tx.onerror=tx.onabort=()=>reject(tx.error||new Error("Repair task cleanup failed"));
+   let tx,removed=false;try{tx=db.transaction([META_STORE],"readwrite")}catch(e){reject(e);return}
+   const store=tx.objectStore(META_STORE),req=store.get("repairTask|"+key);
+   req.onsuccess=()=>{if(req.result&&(!kind||req.result.kind===kind)){store.delete("repairTask|"+key);removed=true}};
+   req.onerror=()=>{try{tx.abort()}catch(_){}};
+   tx.oncomplete=()=>{if(removed)retryDueAt.delete(key);resolve(removed)};tx.onerror=tx.onabort=()=>reject(tx.error||new Error("Repair task cleanup failed"));
   });
+ }
+ async function restoreRepairTasks(){
+  if(repairTasksLoaded)return;
+  if(repairTasksLoading)return repairTasksLoading;
+  repairTasksLoading=(async()=>{
+   const db=await getDB();if(!db){repairTasksLoaded=true;return}
+   const tasks=await new Promise((resolve,reject)=>{let tx;try{tx=db.transaction([META_STORE],"readonly")}catch(error){reject(error);return}const req=tx.objectStore(META_STORE).getAll();req.onsuccess=()=>resolve(req.result||[]);req.onerror=()=>reject(tx.error||new Error("Repair task recovery read failed"));tx.onerror=tx.onabort=()=>reject(tx.error||new Error("Repair task recovery transaction failed"))});
+   for(const task of tasks){if(!String(task?.id||"").startsWith("repairTask|")||!task.key)continue;failed.set(task.key,String(task.error||"Previous repair attempt failed"));retryAttempts.set(task.key,Math.max(0,Number(task.attempt)||0));retryDueAt.set(task.key,Math.max(Date.now(),Number(task.nextRetryAt)||Date.now()))}
+   repairTasksLoaded=true;
+   if(failed.size)onState({status:"repair-tasks-restored",count:failed.size,keys:[...failed.keys()]});
+  })().finally(()=>{repairTasksLoading=null});
+  return repairTasksLoading;
  }
  function scheduleHistoryRetry(){
   if(historyRetryTimer||stopped||!failed.size)return;
-  const attempt=Math.max(0,...retryAttempts.values());
-  const delay=Math.min(300000,30000*2**Math.min(attempt,4));
+  const now=Date.now(),due=[...retryDueAt.values()].filter(Number.isFinite);
+  const delay=due.length?Math.max(1000,Math.min(...due)-now):historyRetryDelay(Math.max(0,...retryAttempts.values()));
   historyRetryTimer=setTimeout(()=>{historyRetryTimer=0;startHistoryQueue(true)},delay);
  }
  async function write(key,rows,done,status="ok",error=null){
@@ -178,12 +205,12 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
  function isActive(c,tf){return !stopped&&c===contract&&tf===timeframe}
  function render(rows,token=selection,tf=timeframe){if(stopped||token!==selection||tf!==timeframe)return;const w=frame?.contentWindow;if(!w)return;w.setCandles?.(rows);w.setVegasEmaCandles?.(rows);w.setHistoryStatus?.(symbol,rows.length,complete,complete?"ready":"loading","",tf)}
  async function repairGaps(c,tf,source){
-  let rows=source,guard=0;const step=MS[tf]/1000,key=keyOf(c,tf);
+  let rows=source,guard=0;const key=keyOf(c,tf);
   while(canWork()&&guard++<10000){
-   let left=null,right=null;
-   for(let i=1;i<rows.length;i++){if(rows[i].t-rows[i-1].t>step){left=rows[i-1].t;right=rows[i].t;break}}
-   if(left===null)return rows;
-   const added=await range(c,tf,left+step,right-1);
+   const gap=findCandleGaps(rows,tf)[0];
+   if(!gap)return rows;
+   if(gap.misaligned||gap.missingCount<1)throw new Error("Gate history contains misaligned candle timestamps");
+   const added=await range(c,tf,gap.from,gap.to);
    if(!canWork())return rows;
    const next=merge(rows,added);
    if(next.length===rows.length)throw new Error("Gate history gap remains unresolved");
@@ -202,12 +229,13 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
   const key=keyOf(c,tf),cached=await read(key);
   if(!canWork())return;
   if(cached.historyBoundaryReached===true&&cached.latestGapStatus==="clear"){
-  const fresh=isActive(c,tf)?[]:await latest(c,3,tf);
+  const fresh=await latest(c,3,tf);
   if(!canWork())return;
   let verified=merge(cached.candles,fresh);
   if(fresh.length)await write(key,verified,true,"latest-data-updated");
   verified=await repairGaps(c,tf,verified);
   if(!canWork()){await write(key,verified,true,"paused");return}
+  if(!hasLatestCoverage(verified,tf))throw new Error("Latest Gate candle coverage is stale or incomplete");
   await write(key,verified,true,"latest-verified");
   await ensureEmaSeries(key,verified,await getDB());
   if(isActive(c,tf)){candles=verified;complete=true;render(verified,selection,tf)}
@@ -215,7 +243,7 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
  }
   let rows=merge(cached.candles),done=cached.historyBoundaryReached===true;
   if(isActive(c,tf)&&!rows.length)return;
-  const fresh=isActive(c,tf)?[]:await latest(c,rows.length?3:PAGE,tf);
+  const fresh=await latest(c,rows.length?3:PAGE,tf);
   if(!canWork())return;
   rows=merge(rows,fresh);
   if(!rows.length)throw new Error("Gate returned no historical candles for "+c+" "+tf);
@@ -223,6 +251,7 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
   const before=rows.length;
   rows=await repairGaps(c,tf,rows);
   if(!canWork()){await write(key,rows,false,"paused");return}
+  if(!hasLatestCoverage(rows,tf))throw new Error("Latest Gate candle coverage is stale or incomplete");
   if(rows.length!==before)done=false;
   await write(key,rows,done,fresh.length?"latest-verified":"history-backfill");
   if(isActive(c,tf)){candles=rows;complete=done;render(rows,selection,tf)}
@@ -260,17 +289,18 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
      if(!canWork())break;
      const key=keyOf(item.gateContract||item.contract,tf);
      if(completed.has(key)&&!forceLatestSweep)continue;
+     if(failed.has(key)&&(retryDueAt.get(key)||0)>Date.now())continue;
      const c=item.gateContract||item.contract;
      try{
       await backfillPeriod(c,tf);
       if(completed.has(key)){
-       failed.delete(key);retryAttempts.delete(key);
+       failed.delete(key);retryAttempts.delete(key);retryDueAt.delete(key);
        try{await clearRepairTask(key)}catch(error){onState({status:"repair-task-cleanup-failed",key,error:String(error?.message||error)})}
       }
      }catch(error){
       if(!canWork())break;
       const message=String(error?.message||error),attempt=(retryAttempts.get(key)||0)+1;
-      retryAttempts.set(key,attempt);failed.set(key,message);
+      retryAttempts.set(key,attempt);failed.set(key,message);retryDueAt.set(key,Date.now()+historyRetryDelay(attempt));
       try{
        const snapshot=await read(key);
        await write(key,snapshot.candles,false,"failed",message);
@@ -293,7 +323,7 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
    }
   }
  }
- function startHistoryQueue(forceLatest=false){if(stopped||paused||isHidden())return;if(forceLatest){forceLatestSweep=true;if(historyRetryTimer){clearTimeout(historyRetryTimer);historyRetryTimer=0}}if(queueRunning){if(forceLatest)queueRestartRequested=true;return;}void runHistoryQueue()}
+ function startHistoryQueue(forceLatest=false){if(stopped||paused||isHidden())return;if(forceLatest){forceLatestSweep=true;if(historyRetryTimer){clearTimeout(historyRetryTimer);historyRetryTimer=0}}if(queueRunning){if(forceLatest)queueRestartRequested=true;return;}void restoreRepairTasks().catch(error=>onState({status:"repair-task-recovery-failed",error:String(error?.message||error)})).finally(()=>{if(!stopped&&!paused&&!isHidden())void runHistoryQueue()})}
  async function updateLatest(c,tf,token,force=false){
   const key=keyOf(c,tf),last=latestCheckedAt.get(key)||0;
   if(!force&&Date.now()-last<60000)return true;
@@ -313,18 +343,26 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
    try{
     const repaired=await repairGaps(c,tf,merged);
     if(!canWork())return true;
+    if(!hasLatestCoverage(repaired,tf))throw new Error("Latest Gate candle coverage is stale or incomplete");
     if(repaired.length!==merged.length){
      await write(key,repaired,cached.historyBoundaryReached===true,"latest-verified");
      await updateLatestEma(key,repaired,await getDB());
      if(isActive(c,tf)&&current(token)){candles=merge(repaired);render(candles,token,tf)}
-    }else if(!repaired.some((row,i)=>i>0&&row.t-repaired[i-1].t>MS[tf]/1000)){
+    }else{
      await write(key,repaired,cached.historyBoundaryReached===true,"latest-verified");
     }
+    const clearedLatestTask=await clearRepairTask(key,"latest");
+    if(clearedLatestTask){failed.delete(key);retryAttempts.delete(key);retryDueAt.delete(key)}
+    onState({symbol,contract:c,timeframe:tf,status:"latest-gap-repaired",count:repaired.length});
    }catch(error){
     const savedAfterRepair=await read(key);
-    await write(key,savedAfterRepair.candles,cached.historyBoundaryReached===true,"history-gap-pending",String(error?.message||error));
+    const message=String(error?.message||error),attempt=(retryAttempts.get(key)||0)+1,nextRetryAt=Date.now()+historyRetryDelay(attempt);
+    retryAttempts.set(key,attempt);retryDueAt.set(key,nextRetryAt);failed.set(key,message);
+    await write(key,savedAfterRepair.candles,cached.historyBoundaryReached===true,"history-gap-pending",message);
     await updateLatestEma(key,savedAfterRepair.candles,await getDB());
-    if(isActive(c,tf)&&current(token)){candles=merge(savedAfterRepair.candles);render(candles,token,tf);onState({symbol,contract:c,timeframe:tf,status:"history-gap-pending",error:String(error?.message||error)});}
+    try{await persistRepairTask(key,message,attempt,"latest")}catch(persistError){onState({status:"repair-task-persist-failed",key,error:String(persistError?.message||persistError)})}
+    scheduleHistoryRetry();
+    if(isActive(c,tf)&&current(token)){candles=merge(savedAfterRepair.candles);render(candles,token,tf);onState({symbol,contract:c,timeframe:tf,status:"history-gap-pending",error:message});}
    }
    if(!cached.candles?.length&&!completed.has(key)){if(queueRunning)queueRestartRequested=true;else startHistoryQueue();}
    return true;

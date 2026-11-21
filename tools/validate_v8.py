@@ -121,6 +121,12 @@ if min(latest_write, latest_ema, gap_repair) < 0 or not (latest_write < latest_e
     fail("latest candles and EMA must be persisted before independent historical gap repair")
 if "latest-verified" not in controller:
     fail("successful gap repair does not mark the series verified")
+if "restoreRepairTasks" not in controller or 'getAll()' not in controller or "repair-tasks-restored" not in controller:
+    fail("persisted repair tasks are not restored after controller restart")
+if "hasLatestCoverage" not in controller or "findCandleGaps" not in controller:
+    fail("latest-tail or aligned historical gap verification is missing")
+if "historyRetryDelay" not in controller or "retryDueAt" not in controller:
+    fail("persisted retry backoff state is missing")
 if 'DB_NAME="vegas-v6-market-cache"' not in controller:
     fail("Gate IndexedDB namespace is not V6-isolated")
 

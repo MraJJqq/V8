@@ -33,6 +33,10 @@ jobs:
           SRC=/tmp/vegas-media
           mkdir -p docs tools assets/backgrounds
 
+          # Preserve V8-owned reliability code and checks across Media baseline refreshes.
+          cp kline/gate-kline-controller.js /tmp/v8-gate-kline-controller.js
+          cp tools/validate_v8.py /tmp/v8-validate_v8.py
+
           # Runtime package: copy the complete V6 seven-system snapshot to V8 root.
           cp -a "$SRC/V6/assets" .
           cp -a "$SRC/V6/cards" .
@@ -200,8 +204,14 @@ jobs:
                           p.unlink()
           PY
 
+          cp /tmp/v8-validate_v8.py tools/validate_v8.py
           touch .nojekyll
           python3 tools/validate_v8.py
+          node --input-type=module --check < kline/gate-kline-controller.js
+          npm install --prefix /tmp/v8-test-deps --no-save --package-lock=false fake-indexeddb@6.2.4
+          ln -s /tmp/v8-test-deps/node_modules node_modules
+          node --test tests/kline-controller.test.mjs
+          rm node_modules
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
