@@ -128,7 +128,9 @@ test("controller repairs a real latest-end gap and persists verified candles", a
   const contract = "SIM_REPAIR_USDT", key = "gate-usdt:" + contract + ":1H";
   const current = Math.floor(Date.now() / 3600000) * 3600;
   const missing = candle(current - hour), latestRows = [candle(current - 3 * hour), candle(current - 2 * hour)];
-  const oldFetch = globalThis.fetch;
+  const oldFetch = globalThis.fetch, oldNow = Date.now;
+  // Keep this fixture outside Gate's two-minute publication-grace window.
+  Date.now = () => current * 1000 + 180000;
   globalThis.fetch = async input => {
     const url = new URL(String(input));
     if (url.searchParams.has("from")) return response([missing]);
@@ -144,6 +146,7 @@ test("controller repairs a real latest-end gap and persists verified candles", a
   } finally {
     waiting.controller.destroy();
     globalThis.fetch = oldFetch;
+    Date.now = oldNow;
   }
 });
 

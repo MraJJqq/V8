@@ -1,6 +1,6 @@
 # VEGAS V8 — System Modules & Operating Flows
 
-This directory documents the seven V8 systems. Its baseline source snapshot was captured from V6 commit `168f1b40a29d1d0e72ad6aa325670404da1f3a30`; the full-screen dynamic system and directly coupled host styles were synchronized from V6 commit `d7f2fe3bee7d7fad00125b233b30bee5af1489c9`. The synchronized files are byte-identical to their current V6 counterparts. The GitHub Pages workflow and generated background output are build/deployment artifacts and are not part of this snapshot; background artwork and its generator are maintained separately under `../Backgrounds/`. This V8 deployment document describes the seven-system runtime synchronized from the Media V6 baseline.
+This directory documents the seven V8 systems. It is maintained against the current files in this directory; V8 deployment records the exact Media commit used for each build. The GitHub Pages workflow and generated deployment output are build artifacts; canonical background artwork and its generator are maintained separately under `../Backgrounds/`.
 
 ## Scope
 
@@ -37,14 +37,14 @@ Sources:
 - `modules/shared/lifecycle.js`
 - `modules/shared/page-lifecycle-v6.js`
 - `modules/shared/config.js`
+- `modules/shared/instrument-catalog.js`
 - `modules/shared/universe-v6.js`
-- `modules/shared/gate-universe.js`
 - `assets/css/full-screen-dynamic.css`
 - `assets/css/v6-modules.css`
 - `modules/v6-runtime.js`
 
 Responsibilities:
-- Maintain one 22-instrument universe and its Gate contract mapping.
+- Maintain one 22-instrument catalog; `universe-v6.js` derives the Gate contract mapping from catalog entries.
 - Coordinate page visibility, pagehide/pageshow and suspended/resumed work.
 - Own page-level timers and cleanups; prevent hidden-page polling and animation work.
 - Coordinate symbol selection, timeframe changes, K-line state and user-interaction locks.
@@ -62,7 +62,7 @@ Operating flow:
 2. Resolve each card's logo through the local `assets/logos/Core` or `assets/logos/Stocks` paths.
 3. Maintain price/open/change state in fixed-size arrays. Update only dirty card text; off-screen cards defer text refresh until they re-enter view.
 4. Calculate the ring layout when the viewport dimensions change; animate the ring using the module's animation loop.
-5. Accept market quote updates through the exposed `updateQuote` / `updateQuotes` window interface. The host obtains Gate USDT perpetual tickers and passes validated quote values to the card module.
+5. Accept market quote updates through the batch-only `window.updateQuotes` interface; the host sets the card order through `window.setCardOrder`. The host obtains Gate USDT perpetual tickers and passes validated quote values to the card module.
 6. Pointer/touch drag and inertia are handled within the card module. Interaction with the page's main symbol rotation is coordinated by the host runtime.
 
 ## Logo and countdown

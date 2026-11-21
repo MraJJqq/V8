@@ -105,3 +105,23 @@ test("page lifecycle suspends and resumes once across visibility and BFCache eve
   lifecycle.destroy();
   assert.equal(lifecycle.isSuspended(), true);
 });
+
+
+test("operating-flow documentation matches the current catalog and card interfaces", async () => {
+  const docs = await source("OPERATING-FLOWS.md").catch(() => source("docs/SEVEN-SYSTEMS.md"));
+  assert.match(docs, /modules\/shared\/instrument-catalog\.js/);
+  assert.match(docs, /modules\/shared\/universe-v6\.js/);
+  assert.doesNotMatch(docs, /gate-universe\.js/);
+  assert.match(docs, /window\.updateQuotes/);
+  assert.match(docs, /window\.setCardOrder/);
+  assert.doesNotMatch(docs, /updateQuote\s*\/\s*updateQuotes/);
+});
+
+test("responsive layout contracts retain dynamic viewport and safe-area handling", async () => {
+  const full = await source("assets/css/full-screen-dynamic.css");
+  const cards = await source("cards/rolling-cards.css");
+  assert.match(full, /100dvh/);
+  assert.match(full, /safe-area-inset/);
+  assert.match(full, /orientation|landscape|portrait/i);
+  assert.match(cards, /ResizeObserver|touch-action|pointer-events|overflow/i);
+});

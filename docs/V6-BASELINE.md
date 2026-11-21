@@ -47,4 +47,4 @@
 - The local catalog owns each instrument's display category and its V12 feed symbol alias; the V12 scan whitelist remains independent and is checked against the catalog in automated tests.
 - Card quotes use one batch update API and card ordering uses the direct parent API; compatibility message and single-quote shims are not retained.
 - The global full-screen stylesheet is the sole owner of top-level iframe geometry, including the timeframe selector. The timeframe host stylesheet owns presentation only.
-- CI runs static integrity checks and the complete V6 system test suite whenever any file under V6 changes.
+- CI runs static integrity checks and the complete V6 system test suite when V6 runtime files, canonical asset collections, references, UI specifications, the library README, or workflow definitions change.
