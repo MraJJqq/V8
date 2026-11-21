@@ -26,14 +26,14 @@ jobs:
       - name: Fetch complete Media library
         run: git clone --depth 1 https://github.com/MraJJqq/Media.git /tmp/vegas-media
 
-      - name: Migrate all seven systems and supporting assets
+      - name: Migrate, validate and deploy V8
         shell: bash
         run: |
           set -euo pipefail
           SRC=/tmp/vegas-media
           mkdir -p docs tools assets/backgrounds
 
-          # Runtime package: copy the complete V6 seven-system snapshot to V8 root.
+          # Copy the complete seven-system runtime from the Media baseline.
           cp -a "$SRC/V6/assets" .
           cp -a "$SRC/V6/cards" .
           cp -a "$SRC/V6/kline" .
@@ -43,22 +43,22 @@ jobs:
           cp "$SRC/V6/README.md" docs/V6-BASELINE.md
           cp "$SRC/V6/OPERATING-FLOWS.md" docs/SEVEN-SYSTEMS.md
 
-          # Retain every separate Media asset/reference collection as well.
+          # Copy all canonical Media asset collections.
           for dir in Backgrounds Brand Logos Cards Charts References Templates UI; do
             cp -a "$SRC/$dir" .
           done
           cp "$SRC/README.md" docs/MEDIA-LIBRARY-README.md
           cp "$SRC/Backgrounds/V6-Dark-Galaxy.svg" assets/backgrounds/V6-Dark-Galaxy.svg
 
-          # Present the rebuilt site as V8 while keeping the proven runtime logic intact.
+          # V8 branding only; runtime and display behavior remain Media-derived.
           sed -i 's/<title>VEGAS V6 · Gate<\/title>/<title>VEGAS V8 · Gate<\/title>/' index.html
 
-          # Align the operating-flow document with the implemented five-period selector.
+          # Update documentation for the implemented five-period selector.
           python3 - <<'PY'
           from pathlib import Path
           p = Path("docs/SEVEN-SYSTEMS.md")
           s = p.read_text(encoding="utf-8")
-          replacements = [
+          for old, new in (
               ("four native display intervals: `1H`, `4H`, `8H`, `D`.",
                "five native display intervals: `1H`, `2H`, `4H`, `8H`, `D`."),
               ("accepted values are `1H`, `4H`, `8H`, and `D`.",
@@ -67,24 +67,35 @@ jobs:
                "Supported intervals in this system are `1H`, `2H`, `4H`, `8H`, and `D`."),
               ("all four intervals", "all five intervals"),
               ("four intervals propagate", "five intervals propagate"),
-          ]
-          for old, new in replacements:
+              ("24 个本地卡片", "22 个本地卡片"),
+              ("24 个本地 SVG 标识", "22 个本地 SVG 标识"),
+              ("V12 扫描池现为24个品种", "V12 扫描池现为22个品种"),
+              ("本地24个品种展示", "本地22个品种展示"),
+              ("24 个本地品种 Logo", "22 个启用品种 Logo"),
+              ("24-instrument universe", "22-instrument universe"),
+              ("24-item session rotation queue", "22-item session rotation queue"),
+              ("exactly 24 complete entries", "exactly 22 complete entries"),
+              ("24 symbols to its local SVG asset", "22 symbols to its local SVG asset"),
+              ("24 个品种", "22 个品种"),
+              ("24-item", "22-item"),
+              ("24 symbols", "22 symbols"),
+              ("24 SVG files", "22 active SVG files"),
+          ):
               s = s.replace(old, new)
           p.write_text(s, encoding="utf-8")
-
-
+          PY
 
           cat > README.md <<'EOF'
           # VEGAS V8
 
-          VEGAS V8 is rebuilt from the Media library's complete seven-system website package. All seven systems, their runtime files, local dependencies, visual assets and operating rules are migrated together.
+          VEGAS V8 is rebuilt from the Media library's complete seven-system website package. Runtime files, local dependencies, visual assets and operating rules are migrated together.
 
           ## 七大系统
 
           1. **K线系统**：Gate USDT 永续合约 K线、历史补齐、实时更新、缓存和 Vegas EMA。
-          2. **统一视窗与手势系统**：五个周期共用一套页面级视窗状态；周期和品种切换不创建独立缩放状态。
-          3. **滚动行情卡片系统**：24 个本地卡片、Gate 行情、点选、拖动和轮播。
-          4. **Logo 与倒计时系统**：24 个本地 SVG 标识、淡入淡出切换和周期倒计时。
+          2. **统一视窗与手势系统**：五个周期共用一套页面级视窗状态。
+          3. **滚动行情卡片系统**：22 个本地卡片、Gate 行情、点选、拖动和轮播。
+          4. **Logo 与倒计时系统**：22 个启用品种 SVG 标识、淡入淡出切换和周期倒计时。
           5. **五周期系统**：**1H、2H、4H、8H、D**；2H 由 Gate 原始 1H K线按 UTC 两小时边界聚合。
           6. **V12 信号与底部滚动系统**：读取 V12 公共信号 JSON；V8 只展示信号，不复制信号生成、扫描或推送。
           7. **全屏幕动态系统**：统一负责动态视口高度、横竖屏布局和安全区域适配。
@@ -92,64 +103,21 @@ jobs:
           ## 数据与资源边界
 
           - K线与卡片行情：Gate USDT 永续合约。
-          - 正式信号：`https://raw.githubusercontent.com/MraJJqq/v12/main/v12/public-signals.json`；V12 扫描池现为24个品种，V8 从中筛选本地24个品种展示。
-          - 24 个本地品种 Logo、字体、图标、CSS、模块和页面资源均在本仓库本地保存。
+          - 正式信号：V12 公共信号 JSON；V8 使用 Media 定义的 22 品种本地池。
+          - 22 个启用品种 Logo、字体、图标、CSS、模块和页面资源均在本仓库本地保存。
           - 背景原始素材保留在 `Backgrounds/`；网页实际使用的背景副本位于 `assets/backgrounds/`。
-          - 五个周期共用同一套视窗状态，不得拆分为各周期独立视窗。
+          - 五个周期共用同一套视窗状态，不拆分为各周期独立视窗。
 
           ## 目录
 
           - `index.html`：V8 网页入口。
           - `assets/`、`cards/`、`kline/`、`modules/`：七大系统运行代码和本地依赖。
-          - `Backgrounds/`、`Brand/`、`Logos/`、`Cards/`、`Charts/`、`References/`、`Templates/`、`UI/`：完整配套素材与规范。
+          - `Backgrounds/`、`Brand/`、`Logos/`、`Cards/`、`Charts/`、`References/`、`Templates/`、`UI/`：配套素材与规范。
           - `docs/SEVEN-SYSTEMS.md`：七大系统职责、运行流程和集成契约。
-          - `tools/validate_v8.py`：静态完整性检查。
+          - `tools/validate_v8.py`：V8 静态完整性检查。
 
           GitHub Pages 由 `.github/workflows/pages.yml` 自动部署。
           EOF
-
-          # Media/V6 is the single source of truth for the current 22-symbol universe.
-          # No retired 24-symbol or AAPL/TSLA rewrite is applied during deployment.
-          python3 - <<'PY'
-          from pathlib import Path
-          for name in ("README.md", "docs/SEVEN-SYSTEMS.md"):
-              p = Path(name)
-              if p.exists():
-                  s = p.read_text(encoding="utf-8")
-                  for old, new in (
-                      ("24 个本地卡片", "22 个本地卡片"),
-                      ("24 个本地 SVG 标识", "22 个本地 SVG 标识"),
-                      ("V12 扫描池现为24个品种", "V12 扫描池现为22个品种"),
-                      ("本地24个品种展示", "本地22个品种展示"),
-                      ("24 个本地品种 Logo", "22 个启用品种 Logo"),
-                      ("24-instrument universe", "22-instrument universe"),
-                      ("24-item session rotation queue", "22-item session rotation queue"),
-                      ("exactly 24 complete entries", "exactly 22 complete entries"),
-                      ("24 symbols to its local SVG asset", "22 symbols to its local SVG asset"),
-                      ("24 个品种", "22 个品种"),
-                      ("24-item", "22-item"),
-                      ("24 symbols", "22 symbols"),
-                      ("24 SVG files", "22 active SVG files"),
-                  ):
-                      s = s.replace(old, new)
-                  p.write_text(s, encoding="utf-8")
-          PY
-          touch .nojekyll
-          python3 tools/validate_v8.py
-          node --input-type=module --check < kline/gate-kline-controller.js
-          npm install --prefix /tmp/v8-test-deps --no-save --package-lock=false fake-indexeddb@6.2.4
-          ln -s /tmp/v8-test-deps/node_modules node_modules
-          node --test tests/kline-controller.test.mjs
-          rm node_modules
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          if ! git diff --cached --quiet; then
-            git commit -m "Rebuild V8 from complete Media seven-system package"
-            git push origin HEAD:main
-          fi
-
 
           touch .nojekyll
           python3 tools/validate_v8.py
