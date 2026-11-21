@@ -6,6 +6,18 @@ const TIMEFRAMES=Object.freeze(["1H","2H","4H","8H","D"]);
 const MS=Object.freeze({"1H":3600000,"2H":7200000,"4H":14400000,"8H":28800000,"D":86400000});
 export const GATE_REQUEST_TIMEOUT_MS=15000;
 const PAGE=2000,API="https://api.gateio.ws/api/v4/futures/usdt",WS_URL="wss://fx-ws.gateio.ws/v4/ws/usdt";
+export function twoHourRangeWindows(from,to,pageSize=PAGE){
+ const step=3600,bucket=7200,limit=Math.min(PAGE,Math.floor(Number(pageSize)/2)*2);
+ if(!Number.isSafeInteger(from)||!Number.isSafeInteger(to)||from<0||to<from||from%bucket!==0)throw new TypeError("Invalid 2H history range");
+ if(!Number.isFinite(limit)||limit<2)throw new TypeError("2H history page size must allow a complete hourly pair");
+ const end=Math.floor(to/bucket)*bucket+step,windows=[];
+ for(let cursor=from;cursor<=end;){
+  const windowEnd=Math.min(end,cursor+(limit-1)*step);
+  windows.push({from:cursor,to:windowEnd});
+  cursor=windowEnd+step;
+ }
+ return windows;
+}
 export function findCandleGaps(rows,tf){
  const step=MS[tf]/1000;if(!step||!Array.isArray(rows))throw new TypeError("Unsupported timeframe or candle rows");
  const gaps=[];for(let i=1;i<rows.length;i++){const previous=rows[i-1].t,current=rows[i].t,delta=current-previous,misaligned=previous%step!==0||current%step!==0||delta%step!==0;if(delta>step||misaligned)gaps.push({from:previous+step,to:current-step,missingCount:Math.max(0,Math.floor(delta/step)-1),misaligned})}return gaps;
@@ -252,7 +264,7 @@ export function createGateKlineController({frame,instruments=[],onState=()=>{},i
  async function assertContract(c){const all=await getContracts();if(!all.has(c))throw new Error("Gate USDT perpetual contract not found: "+c);return all.get(c)}
  async function latest(c,n,tf){if(tf==="2H"){const count=Math.min(2000,Math.max(4,n*2+2)),u=API+"/candlesticks?contract="+encodeURIComponent(c)+"&interval=1h&limit="+count;return aggregate2H(await request(u,"1H"))}const u=API+"/candlesticks?contract="+encodeURIComponent(c)+"&interval="+INTERVALS[tf]+"&limit="+n;return merge(await request(u,tf))}
  async function older(c,tf,oldest){if(tf==="2H"){const step=3600,from=Math.max(0,oldest-PAGE*step),to=Math.max(0,oldest-1);if(to<=from)return [];const u=API+"/candlesticks?contract="+encodeURIComponent(c)+"&interval=1h&from="+from+"&to="+to;return aggregate2H(await request(u,"1H"))}const step=MS[tf]/1000,from=Math.max(0,oldest-PAGE*step),to=Math.max(0,oldest-1);if(to<=from)return [];const u=API+"/candlesticks?contract="+encodeURIComponent(c)+"&interval="+INTERVALS[tf]+"&from="+from+"&to="+to;return merge(await request(u,tf))}
- async function range(c,tf,from,to){if(tf==="2H"){const step=3600;let cursor=Math.max(0,from),rows=[];while(cursor<=to&&canWork()){const end=Math.min(to,cursor+(PAGE-1)*step),u=API+"/candlesticks?contract="+encodeURIComponent(c)+"&interval=1h&from="+cursor+"&to="+end,part=await request(u,"1H");if(!canWork())break;if(!part.length)throw new Error("Gate history gap could not be filled");rows=merge(rows,aggregate2H(part));const next=part[part.length-1].t+step;if(next<=cursor)throw new Error("Gate gap repair pagination stalled");cursor=next}return rows}const step=MS[tf]/1000;let cursor=Math.max(0,from),rows=[];while(cursor<=to&&canWork()){const end=Math.min(to,cursor+(PAGE-1)*step),u=API+"/candlesticks?contract="+encodeURIComponent(c)+"&interval="+INTERVALS[tf]+"&from="+cursor+"&to="+end,part=await request(u,tf);if(!canWork())break;if(!part.length)throw new Error("Gate history gap could not be filled");rows=merge(rows,part);const next=part[part.length-1].t+step;if(next<=cursor)throw new Error("Gate gap repair pagination stalled");cursor=next}return rows}
+ async function range(c,tf,from,to){if(tf==="2H"){let rows=[];for(const window of twoHourRangeWindows(from,to)){if(!canWork())break;const u=API+"/candlesticks?contract="+encodeURIComponent(c)+"&interval=1h&from="+window.from+"&to="+window.to,part=await request(u,"1H");if(!canWork())break;if(!part.length)throw new Error("Gate history gap could not be filled");rows=merge(rows,aggregate2H(part))}return rows}const step=MS[tf]/1000;let cursor=Math.max(0,from),rows=[];while(cursor<=to&&canWork()){const end=Math.min(to,cursor+(PAGE-1)*step),u=API+"/candlesticks?contract="+encodeURIComponent(c)+"&interval="+INTERVALS[tf]+"&from="+cursor+"&to="+end,part=await request(u,tf);if(!canWork())break;if(!part.length)throw new Error("Gate history gap could not be filled");rows=merge(rows,part);const next=part[part.length-1].t+step;if(next<=cursor)throw new Error("Gate gap repair pagination stalled");cursor=next}return rows}
  function isActive(c,tf){return !stopped&&c===contract&&tf===timeframe}
  function render(rows,token=selection,tf=timeframe){if(stopped||token!==selection||tf!==timeframe)return;const w=frame?.contentWindow;if(!w)return;w.setCandles?.(rows);w.setVegasEmaCandles?.(rows);w.setHistoryStatus?.(symbol,rows.length,complete,complete?"ready":"loading","",tf)}
  async function repairGaps(c,tf,source){

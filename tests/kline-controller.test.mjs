@@ -5,7 +5,7 @@ import "fake-indexeddb/auto";
 
 const source = await readFile(new URL("../kline/gate-kline-controller.js", import.meta.url), "utf8");
 const moduleUrl = "data:text/javascript;base64," + Buffer.from(source).toString("base64");
-const { aggregate2H, createGateKlineController, expectedLatestCandleTimestamp, findCandleGaps, GATE_REQUEST_TIMEOUT_MS, hasLatestCoverage, historyRetryDelay } = await import(moduleUrl);
+const { aggregate2H, createGateKlineController, expectedLatestCandleTimestamp, findCandleGaps, GATE_REQUEST_TIMEOUT_MS, hasLatestCoverage, historyRetryDelay, twoHourRangeWindows } = await import(moduleUrl);
 const hour = 3600;
 const candle = (t, close = 100) => ({ t, o: close, h: close + 2, l: close - 2, c: close + 1 });
 const utc = value => Math.floor(Date.parse(value) / 1000);
@@ -497,4 +497,26 @@ test("enforces the per-series memory-cache cap without marking truncated history
     if (descriptor) Object.defineProperty(indexedDB, "open", descriptor);
     else delete indexedDB.open;
   }
+});
+
+
+test("2H historical gap windows include the second 1H candle and preserve aligned 2000-row pages", () => {
+  const start = utc("2026-11-21T00:00:00Z");
+  assert.deepEqual(twoHourRangeWindows(start, start), [
+    { from: start, to: start + hour }
+  ]);
+  // A latest-tail range may end one second before the next 2H boundary.
+  assert.deepEqual(twoHourRangeWindows(start, start + 2 * hour - 1), [
+    { from: start, to: start + hour }
+  ]);
+  const windows = twoHourRangeWindows(start, start + 2000 * hour);
+  assert.equal(windows.length, 2);
+  assert.deepEqual(windows[0], { from: start, to: start + 1999 * hour });
+  assert.deepEqual(windows[1], { from: start + 2000 * hour, to: start + 2001 * hour });
+  for (const window of windows) {
+    assert.equal(window.from % (2 * hour), 0, "each page begins on a UTC 2H pair boundary");
+    assert.ok((window.to - window.from) / hour + 1 <= 2000, "Gate page never exceeds 2000 hourly candles");
+    assert.equal((window.to - window.from) / hour % 2, 1, "each page contains complete hourly pairs");
+  }
+  assert.throws(() => twoHourRangeWindows(start + hour, start + 2 * hour), /Invalid 2H history range/);
 });
