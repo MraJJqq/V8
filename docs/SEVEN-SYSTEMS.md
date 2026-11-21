@@ -1,6 +1,6 @@
-# VEGAS V6 — System Modules & Operating Flows
+# VEGAS V8 — System Modules & Operating Flows
 
-This directory documents the seven V6 systems. Its baseline source snapshot was captured from V6 commit `168f1b40a29d1d0e72ad6aa325670404da1f3a30`; the full-screen dynamic system and directly coupled host styles were synchronized from V6 commit `d7f2fe3bee7d7fad00125b233b30bee5af1489c9`. The synchronized files are byte-identical to their current V6 counterparts. The GitHub Pages workflow and generated background output are build/deployment artifacts and are not part of this snapshot; background artwork and its generator are maintained separately under `../Backgrounds/`. This Media-specific operating-flow document is not part of the V6 runtime repository.
+This directory documents the seven V8 systems. Its baseline source snapshot was captured from V6 commit `168f1b40a29d1d0e72ad6aa325670404da1f3a30`; the full-screen dynamic system and directly coupled host styles were synchronized from V6 commit `d7f2fe3bee7d7fad00125b233b30bee5af1489c9`. The synchronized files are byte-identical to their current V6 counterparts. The GitHub Pages workflow and generated background output are build/deployment artifacts and are not part of this snapshot; background artwork and its generator are maintained separately under `../Backgrounds/`. This V8 deployment document describes the seven-system runtime synchronized from the Media V6 baseline.
 
 ## Scope
 
