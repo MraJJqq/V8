@@ -1,8 +1,6 @@
 import { createLifecycleScope } from "./shared/lifecycle.js";
 import { createPageLifecycle } from "./shared/page-lifecycle-v6.js";
 import { INSTRUMENTS, createSessionQueue } from "./shared/universe-v6.js";
-import { createV12Feed } from "./signal-ticker/v12-feed.js";
-import { createSignalTicker } from "./signal-ticker/ticker.js";
 import { GATE_CONTRACTS } from "./shared/universe-v6.js";
 import { createV6KlineView } from "../kline/v6-kline-view.js?v=v6-kline-pause-20261115-1";
 import { createGateKlineController } from "../kline/gate-kline-controller.js?v=v6-kline-pause-20261115-1";
@@ -16,7 +14,7 @@ const logoFrame=document.getElementById("logo-frame"),timeframeFrame=document.ge
 const klineHost=document.getElementById("kline-host"),STORAGE="vegas-v6-selected-timeframe",RANDOM_START="vegas-v6-last-random-start";
 let timeframe="4H",destroyed=false,logoIndex=0,rotationTimer=null,transitionTimer=null,interactionResumeTimer=null,userRotationPaused=false;
 let transitionActive=false,activeTarget=null,queuedTarget=null;
-let signalBusy=false,quoteBusy=false,foregroundInterval=null,quoteAbort=null;
+let quoteBusy=false,foregroundInterval=null,quoteAbort=null;
 const interactionLocks=new Set();
 try{const saved=localStorage.getItem(STORAGE);if(["1H","2H","4H","8H","D"].includes(saved))timeframe=saved}catch(_){}
 let sessionQueue=[...createSessionQueue()],previous="";
@@ -54,7 +52,6 @@ const rotationPause=createKlineRotationPause({target:klineHost,onToggle:()=>setU
 const controller=createGateKlineController({frame:{contentWindow:view},instruments:GATE_INSTRUMENTS,isHidden:isRuntimeHidden,onState:s=>{if(s.status==="request-failed"||s.status==="cache-unavailable"||s.status==="cache-write-failed")console.warn("[VEGAS V6 data]",s);}});
 lifecycle.listen(window,"unhandledrejection",event=>console.error("[VEGAS V6 unhandled rejection]",event.reason));
 lifecycle.listen(window,"error",event=>console.error("[VEGAS V6 runtime error]",event.message,event.filename,event.lineno));
-const feed=createV12Feed({isHidden:isRuntimeHidden}),ticker=createSignalTicker();
 function selectSymbol(symbol){const item=INSTRUMENTS.find(x=>x.symbol===symbol),contract=GATE_CONTRACTS[symbol];if(!item||!contract){console.warn("[VEGAS V6] Unknown symbol:",symbol);return false;}void controller.select(symbol,contract,timeframe);return true;}
 function clearRotationTimers(){if(rotationTimer!==null){clearTimeout(rotationTimer);rotationTimer=null;}if(transitionTimer!==null){clearTimeout(transitionTimer);transitionTimer=null;}}
 function desiredTarget(){return queuedTarget||activeTarget||{symbolIndex:logoIndex,timeframe};}
@@ -115,12 +112,6 @@ function transitionToIndex(index){
 }
 function startSymbolRotation(){if(destroyed||isRuntimeHidden())return;sendLogoState();scheduleSymbolRotation();}
 function stopSymbolRotation(){clearRotationTimers();transitionActive=false;activeTarget=null;queuedTarget=null;app.classList.remove("is-symbol-transitioning");}
-async function refreshSignals(){
- if(destroyed||isRuntimeHidden()||signalBusy)return;signalBusy=true;
- try{const payload=await feed.read();if(!destroyed&&!isRuntimeHidden())ticker.render(payload);}
- catch(error){if(isRuntimeHidden()||error.pageHidden||destroyed)return;if(/full-pool scan|current Beijing day/.test(String(error.message)))ticker.render({source:"VEGAS V12",scan_status:"running",symbols_ok:0,symbols_total:22,signals:[]});else{console.warn("[VEGAS V6 V12 feed]",error);ticker.render(null);}}
- finally{signalBusy=false;}
-}
 async function refreshCardQuotes(){
  if(destroyed||isRuntimeHidden()||quoteBusy||typeof window.updateQuotes!=="function")return;
  quoteBusy=true;const abort=new AbortController();quoteAbort=abort;
@@ -144,15 +135,14 @@ async function refreshCardQuotes(){
  }catch(error){if(error.name!=="AbortError"&&!isRuntimeHidden()&&!destroyed)console.warn("[VEGAS V6 Gate card quotes]",error);}
  finally{if(quoteAbort===abort)quoteAbort=null;quoteBusy=false;}
 }
-function startForegroundTimers(){if(destroyed||isRuntimeHidden())return;if(!foregroundInterval)foregroundInterval=lifecycle.interval(()=>{refreshSignals();refreshCardQuotes();void controller.refresh();},300000);}
+function startForegroundTimers(){if(destroyed||isRuntimeHidden())return;if(!foregroundInterval)foregroundInterval=lifecycle.interval(()=>{refreshCardQuotes();void controller.refresh();},300000);}
 function stopForegroundTimers(){foregroundInterval?.();foregroundInterval=null;quoteAbort?.abort();quoteAbort=null;}
-function suspendRuntime(){if(destroyed)return;interactionLocks.clear();if(interactionResumeTimer!==null){clearTimeout(interactionResumeTimer);interactionResumeTimer=null;}document.documentElement.classList.add("vegas-page-hidden");stopForegroundTimers();stopSymbolRotation();controller.suspend();feed.suspend();ticker.setPaused(true);}
-function resumeRuntime(){if(destroyed||isRuntimeHidden())return;document.documentElement.classList.remove("vegas-page-hidden");feed.resume();ticker.setPaused(false);controller.resume();startForegroundTimers();startSymbolRotation();refreshSignals();refreshCardQuotes();}
-function teardown(){if(destroyed)return;destroyed=true;if(interactionResumeTimer!==null)clearTimeout(interactionResumeTimer);interactionLocks.clear();pageLifecycle?.destroy();stopForegroundTimers();stopSymbolRotation();ticker.destroy();feed.destroy();controller.destroy();rotationPause.destroy();view.destroy();lifecycle.destroy();}
+function suspendRuntime(){if(destroyed)return;interactionLocks.clear();if(interactionResumeTimer!==null){clearTimeout(interactionResumeTimer);interactionResumeTimer=null;}document.documentElement.classList.add("vegas-page-hidden");stopForegroundTimers();stopSymbolRotation();controller.suspend();}
+function resumeRuntime(){if(destroyed||isRuntimeHidden())return;document.documentElement.classList.remove("vegas-page-hidden");controller.resume();startForegroundTimers();startSymbolRotation();refreshCardQuotes();}
+function teardown(){if(destroyed)return;destroyed=true;if(interactionResumeTimer!==null)clearTimeout(interactionResumeTimer);interactionLocks.clear();pageLifecycle?.destroy();stopForegroundTimers();stopSymbolRotation();controller.destroy();rotationPause.destroy();view.destroy();lifecycle.destroy();}
 pageLifecycle=createPageLifecycle({documentRef:document,windowRef:window,onSuspend:suspendRuntime,onResume:resumeRuntime,onPageHideFinal:teardown});
 document.documentElement.classList.toggle("vegas-page-hidden",isRuntimeHidden());
 lifecycle.listen(window,"beforeunload",teardown,{once:true});
-ticker.render(null);
 lifecycle.listen(logoFrame,"load",()=>{if(!isRuntimeHidden()){if(transitionActive&&activeTarget)sendLogoState(activeTarget.symbolIndex,timeframe);else sendLogoState();}});
 lifecycle.listen(timeframeFrame,"load",sendTimeframeState);
 lifecycle.listen(window,"message",event=>{
@@ -171,4 +161,4 @@ function initializeCards(){
 if(!initializeCards()&&document.readyState!=="complete")lifecycle.listen(window,"load",initializeCards,{once:true});
 selectSymbol(sessionQueue[logoIndex].symbol);sendTimeframeState();startSymbolRotation();refreshSignals();refreshCardQuotes();startForegroundTimers();
 window.V6Kline=Object.freeze({select:selectSymbol,setTimeframe:switchTimeframe,refresh:()=>controller.refresh(),get state(){return controller.state;}});
-console.info("[VEGAS V6] mounted",INSTRUMENTS.length,"Gate K-line + 5 timeframes + local cards + V12 ticker");
+console.info("[VEGAS V6] mounted",INSTRUMENTS.length,"Gate K-line + 5 timeframes + local cards");

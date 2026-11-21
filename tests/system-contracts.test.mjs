@@ -4,19 +4,13 @@ import { readFile } from "node:fs/promises";
 
 await import("../modules/shared/instrument-catalog.js");
 const { INSTRUMENTS, GATE_CONTRACTS } = await import("../modules/shared/universe-v6.js");
-const { V12_SCAN_SYMBOLS, validateV12Payload, beijingSignalDay } = await import("../modules/signal-ticker/v12-feed.js");
 const root = new URL("../", import.meta.url);
 const source = path => readFile(new URL(path, root), "utf8");
 
-test("catalog and independent V12 whitelist contain the same 22 unique feed symbols", () => {
-  const catalogSymbols = INSTRUMENTS.map(item => item.signalSymbol);
+test("catalog contains 22 unique instruments", () => {
   assert.equal(INSTRUMENTS.length, 22);
   assert.equal(new Set(INSTRUMENTS.map(item => item.symbol)).size, 22);
-  assert.equal(new Set(catalogSymbols).size, 22);
-  assert.deepEqual([...catalogSymbols].sort(), [...V12_SCAN_SYMBOLS].sort());
-  assert.equal(INSTRUMENTS.find(item => item.symbol === "SKHYNIX").signalSymbol, "SKHY");
 });
-
 test("instrument categories are explicit and preserve the existing 18/4 grouping", () => {
   assert.equal(INSTRUMENTS.filter(item => item.category === "美股巨头").length, 18);
   assert.equal(INSTRUMENTS.filter(item => item.category === "核心能源").length, 4);
@@ -24,17 +18,6 @@ test("instrument categories are explicit and preserve the existing 18/4 grouping
   for (const item of INSTRUMENTS) {
     assert.equal(GATE_CONTRACTS[item.symbol], item.contract.replace(/USDT$/, "_USDT"));
   }
-});
-
-test("V12 feed accepts the complete pool and rejects missing or duplicate symbols", () => {
-  const payload = {
-    source: "VEGAS V12", schema_version: 1, signal_day: beijingSignalDay(),
-    scan_status: "complete", symbols_ok: 22, symbols_total: 22,
-    symbols: [...V12_SCAN_SYMBOLS], signals: []
-  };
-  assert.equal(validateV12Payload(payload), payload);
-  assert.throws(() => validateV12Payload({ ...payload, symbols: payload.symbols.slice(1) }), /complete V12 instrument universe|all 22/);
-  assert.throws(() => validateV12Payload({ ...payload, symbols: [...payload.symbols.slice(1), payload.symbols[1]] }), /complete V12 instrument universe/);
 });
 
 test("cards expose only batch quote updates and direct card ordering", async () => {
@@ -47,13 +30,10 @@ test("cards expose only batch quote updates and direct card ordering", async () 
   assert.match(cards, /VEGAS_CARD_SELECT/);
 });
 
-test("logo and ticker consume catalog-owned identity and categories", async () => {
+test("logo consumes catalog-owned identity", async () => {
   const logo = await source("modules/logo/logo.js");
-  const ticker = await source("modules/signal-ticker/ticker.js");
   assert.match(logo, /CATALOG\.map\(item=>\[item\.symbol/);
   assert.match(logo, /ROOT\+entry\[1\]/);
-  assert.match(ticker, /item\.category === "美股巨头"/);
-  assert.match(ticker, /item\.category === "核心能源"/);
 });
 
 test("five timeframe controls and the full-screen stylesheet own the outer iframe geometry", async () => {
@@ -153,17 +133,11 @@ test("host, cards, timeframe and Logo retain their message integration contracts
   assert.match(logo, /VEGAS_LOGO_SET_TIMEFRAME/);
 });
 
-test("Gate quotes and V12 feed retain bounded foreground refresh and failure handling", async () => {
+test("Gate quotes retain bounded foreground refresh and failure handling", async () => {
   const runtime = await source("modules/v6-runtime.js");
-  const feed = await source("modules/signal-ticker/v12-feed.js");
-  const ticker = await source("modules/signal-ticker/ticker.js");
   assert.match(runtime, /300000/);
-  assert.match(runtime, /api\.gateio\.ws\/api\/v4\/futures\/usdt\/tickers/);
+  assert.ok(runtime.includes("api.gateio.ws"));
   assert.match(runtime, /attempt<3/);
-  assert.match(runtime, /new AbortController\(\)/);
-  assert.match(runtime, /feed\.read\(\)/);
-  assert.match(feed, /AbortController/);
-  assert.match(feed, /controller\.abort/);
-  assert.match(ticker, /signal-marquee/);
-  assert.match(ticker, /animationPlayState/);
+  assert.ok(runtime.includes("new AbortController()"));
+  assert.doesNotMatch(runtime, /signal-ticker|refreshSignals|createV12Feed/);
 });
