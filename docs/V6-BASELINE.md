@@ -42,3 +42,9 @@
 - Card observers disconnect on pagehide and reattach on pageshow, including back-forward cache restoration.
 - Card quote polling retries transient failures up to three times with bounded backoff. Background suspension, request aborts, and the existing five-minute refresh cadence remain unchanged.
 - Runtime errors and unhandled promise rejections are logged with the V6 prefix for diagnosis.
+
+## System regression tests
+- The local catalog owns each instrument's display category and its V12 feed symbol alias; the V12 scan whitelist remains independent and is checked against the catalog in automated tests.
+- Card quotes use one batch update API and card ordering uses the direct parent API; compatibility message and single-quote shims are not retained.
+- The global full-screen stylesheet is the sole owner of top-level iframe geometry, including the timeframe selector. The timeframe host stylesheet owns presentation only.
+- CI runs static integrity checks and the complete V6 system test suite whenever any file under V6 changes.

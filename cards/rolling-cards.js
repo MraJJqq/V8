@@ -10,7 +10,7 @@ var FLING_MAX=5;   // 惯性最大速度（弧度/秒）
 var SLOP=4;        // 手指移动超过多少像素才算拖动（小于此值视为点按）
 /* ================================= */
 
-/* ---- 数据：[代码, 初始价] ；接口见文末 updateQuote / updateQuotes ---- */
+/* ---- 数据：[代码, 初始价]；行情统一使用批量 updateQuotes 接口 ---- */
 var CATALOG=window.V6_INSTRUMENT_CATALOG;if(!Array.isArray(CATALOG)||CATALOG.length!==22)throw new Error("V6 instrument catalog unavailable");
 var SYMS=CATALOG.map(function(item){return [item.symbol,0]});
 var N=SYMS.length,W=172,H=100,TAU=Math.PI*2,step=TAU/N,A=SHOW*step;
@@ -205,14 +205,7 @@ window.setCardOrder=function(symbols){
   wake();
   return true;
 };
-window.addEventListener("message",function(event){
-  if(event.origin!=="https://mrajjqq.github.io"||event.source!==window.parent)return;
-  if(event.data?.type==="VEGAS_SET_CARD_ORDER")window.setCardOrder(event.data.symbols);
-});
-
 /* ---- 行情接口 ---- */
-/* 单个：updateQuote(序号, 最新价[, 开盘价]) */
-window.updateQuote=function(i,p,o){if(i>=0&&i<N&&Number.isFinite(p)&&p>0){price[i]=p;if(Number.isFinite(o)&&o>0)open[i]=o;dirty[i]=1;wake()}};
 /* 批量（推荐，每秒一次）：updateQuotes([[序号,最新价,开盘价?],...]) */
 window.updateQuotes=function(l){
   for(var k=0;k<l.length;k++){var q=l[k],i=q[0];if(i>=0&&i<N&&Number.isFinite(q[1])&&q[1]>0){price[i]=q[1];if(Number.isFinite(q[2])&&q[2]>0)open[i]=q[2];dirty[i]=1}}
