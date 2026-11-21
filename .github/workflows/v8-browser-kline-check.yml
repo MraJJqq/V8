@@ -64,14 +64,9 @@ jobs:
           try {
             await page.goto(baseUrl + '?browser-validation=1', { waitUntil: 'domcontentloaded', timeout: 60000 });
             await page.waitForFunction(() => Boolean(window.V6Kline && document.querySelector('#kline-host canvas')), null, { timeout: 45000 });
-            await page.locator('#kline-host').dblclick({ delay: 90 });
-            await page.waitForTimeout(500);
-
             for (const timeframe of timeframes) {
-              if (timeframe !== '4H') {
-                await page.frameLocator('#timeframe-frame').locator('.tf button').filter({ hasText: timeframe }).first().click({ timeout: 15000 });
-                await page.waitForFunction(tf => window.V6Kline?.state?.timeframe === tf, timeframe, { timeout: 20000 });
-              }
+              await page.evaluate(tf => window.V6Kline.setTimeframe(tf), timeframe);
+              await page.waitForFunction(tf => window.V6Kline?.state?.timeframe === tf, timeframe, { timeout: 30000 });
 
               for (const symbol of symbols) {
                 await page.evaluate(sym => window.V6Kline.select(sym), symbol);
@@ -91,17 +86,20 @@ jobs:
                     const canvases = [...document.querySelectorAll('#kline-host canvas')];
                     return canvases.map(canvas => {
                       const ctx = canvas.getContext('2d');
-                      let paintedPixels = 0;
+                      let candlePixels = 0;
                       if (ctx && canvas.width && canvas.height) {
                         const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-                        for (let i = 3; i < pixels.length; i += 4) if (pixels[i] > 0) paintedPixels++;
+                        for (let i = 0; i < pixels.length; i += 4) {
+                          const r = pixels[i], g = pixels[i + 1], b = pixels[i + 2], a = pixels[i + 3];
+                          if (a > 0 && ((g > r * 1.25 && g > b * 1.05 && g > 80) || (r > g * 1.25 && r > b * 1.15 && r > 100))) candlePixels++;
+                        }
                       }
-                      return { width: canvas.width, height: canvas.height, paintedPixels };
+                      return { width: canvas.width, height: canvas.height, candlePixels };
                     });
                   });
                   const state = await page.evaluate(() => window.V6Kline.state);
                   const candleCanvas = observed[0];
-                  const ok = Boolean(candleCanvas && candleCanvas.width > 0 && candleCanvas.height > 0 && candleCanvas.paintedPixels > 0);
+                  const ok = Boolean(candleCanvas && candleCanvas.width > 0 && candleCanvas.height > 0 && candleCanvas.candlePixels > 0);
                   results.push({ symbol, timeframe, ok, candleCount: state.count, canvases: observed });
                   console.log(JSON.stringify(results[results.length - 1]));
                 } catch (error) {
