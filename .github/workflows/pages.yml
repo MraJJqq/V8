@@ -41,6 +41,7 @@ jobs:
           cp -a "$SRC/V6/assets" .
           cp -a "$SRC/V6/cards" .
           cp -a "$SRC/V6/kline" .
+          cp /tmp/v8-gate-kline-controller.js kline/gate-kline-controller.js
           cp -a "$SRC/V6/modules" .
           cp "$SRC/V6/index.html" ./index.html
           cp "$SRC/V6/README.md" docs/V6-BASELINE.md
