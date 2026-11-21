@@ -4,6 +4,7 @@
 
 - Repository: `MraJJqq/Media`.
 - Canonical six-system runtime: `V6/`.
+- Current pinned Media commit: `c715eda42ff02511c3bcd7b3fcc35043e0074f90`.
 - Exact source commit is pinned in `.media-source-sha`; it must be a Git **commit SHA**, not a branch name or tree SHA.
 - The Pages workflow checks out that exact commit before copying the runtime and canonical asset collections into V8.
 
